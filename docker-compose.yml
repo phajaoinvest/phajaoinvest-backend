@@ -3,13 +3,13 @@ version: '3.8'
 services:
   postgres:
     image: timescale/timescaledb:latest-pg17
-    container_name: trading_postgres
+    container_name: phajaoinvest_db
     env_file:
       - .env
     ports:
       - "5431:5432"
     volumes:
-      - ../trading_postgres_data:/var/lib/postgresql/data
+      - ../phajaoinvest_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -19,7 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: trading_redis
+    container_name: phajaoinvest_redis
     ports:
       - "6371:6379"
     volumes:
@@ -30,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: trading_backend
+    container_name: phajaoinvest_backend
     env_file:
       - .env
     ports:
