@@ -18,6 +18,9 @@ export class Role {
   @Column({ type: 'varchar', nullable: false })
   name: string;
 
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
+
   @Column({
     type: 'enum',
     enum: RoleStatus,

@@ -36,9 +36,11 @@ import {
 
 class CreateRoleDto {
   name!: string;
+  description?: string;
 }
 class UpdateRoleDto {
   name?: string;
+  description?: string;
 }
 class AssignPermissionDto {
   permission_id!: string;

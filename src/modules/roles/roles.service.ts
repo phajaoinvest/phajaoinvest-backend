@@ -8,9 +8,11 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 interface CreateRoleDto {
   name: string;
+  description?: string;
 }
 interface UpdateRoleDto {
   name?: string;
+  description?: string;
 }
 
 @Injectable()
