@@ -59,6 +59,8 @@ export class PermissionsController {
   }
 
   @Get()
+  @UseGuards(PermissionsGuard)
+  @PermissionMeta('permissions:read')
   @ApiOperation({ summary: 'List permissions (paginated)' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -75,6 +77,8 @@ export class PermissionsController {
   }
 
   @Get(':id')
+  @UseGuards(PermissionsGuard)
+  @PermissionMeta('permissions:read')
   @ApiOperation({ summary: 'Get permission by id' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.findOne(id);

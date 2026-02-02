@@ -67,6 +67,8 @@ export class RolesController {
   }
 
   @Get()
+  @UseGuards(PermissionsGuard)
+  @Permissions('roles:read')
   @ApiOperation({ summary: 'List roles (paginated)' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -83,6 +85,8 @@ export class RolesController {
   }
 
   @Get(':id')
+  @UseGuards(PermissionsGuard)
+  @Permissions('roles:read')
   @ApiOperation({ summary: 'Get role by id' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.findOne(id);
@@ -114,7 +118,8 @@ export class RolesController {
   // Role-Permission Management Endpoints
 
   @Get(':id/permissions')
-  @UseGuards(JwtUserAuthGuard)
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('roles:read')
   @ApiOperation({ summary: 'Get permissions assigned to a role' })
   @ApiParam({ name: 'id', description: 'Role ID' })
   @ApiResponse({
@@ -125,9 +130,6 @@ export class RolesController {
     @Param('id', ParseUUIDPipe) id: string,
     @AuthUser() user: JwtPayload,
   ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can view role permissions');
-    }
     const data = await this.service.getPermissions(id);
     return handleSuccessOne({ data, message: 'Role permissions fetched' });
   }
@@ -145,11 +147,7 @@ export class RolesController {
   async assignPermission(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(ValidationPipe) dto: AssignPermissionDto,
-    @AuthUser() user: JwtPayload,
   ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can assign permissions');
-    }
     const data = await this.service.assignPermission(id, dto.permission_id);
     return handleSuccessOne({ data, message: 'Permission assigned' });
   }
@@ -167,11 +165,7 @@ export class RolesController {
   async removePermission(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('permissionId', ParseUUIDPipe) permissionId: string,
-    @AuthUser() user: JwtPayload,
   ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can remove permissions');
-    }
     await this.service.removePermission(id, permissionId);
     return handleSuccessOne({ data: null, message: 'Permission removed' });
   }
@@ -189,11 +183,7 @@ export class RolesController {
   async assignMultiplePermissions(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(ValidationPipe) dto: AssignMultiplePermissionsDto,
-    @AuthUser() user: JwtPayload,
   ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can assign permissions');
-    }
     const data = await this.service.assignMultiplePermissions(
       id,
       dto.permission_ids,
@@ -217,11 +207,7 @@ export class RolesController {
   async removeMultiplePermissions(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(ValidationPipe) dto: AssignMultiplePermissionsDto,
-    @AuthUser() user: JwtPayload,
   ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can remove permissions');
-    }
     const data = await this.service.removeMultiplePermissions(
       id,
       dto.permission_ids,
