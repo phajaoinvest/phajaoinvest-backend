@@ -15,14 +15,14 @@ export enum MaritalStatus {
 export enum UserStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
-  BAN = 'ban',
+  SUSPENDED = 'suspended',
   DELETED = 'deleted',
 }
 
 export enum CustomerStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
-  BAN = 'ban',
+  SUSPENDED = 'suspended',
   DELETED = 'deleted',
 }
 
@@ -54,7 +54,7 @@ export enum TransferStatus {
 export enum WalletStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
-  BAN = 'ban',
+  SUSPENDED = 'suspended',
   DELETED = 'deleted',
 }
 

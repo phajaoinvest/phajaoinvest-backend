@@ -11,6 +11,7 @@ import {
   ValidationPipe,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { UserStatus, Gender } from '../../common/enums';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -31,20 +32,38 @@ import {
 class CreateUserDto {
   username!: string;
   password!: string;
-  roleId!: string;
+  first_name!: string;
+  last_name?: string;
+  number?: string;
+  gender?: Gender;
+  tel?: string;
+  address?: string;
+  status?: UserStatus;
+  profile?: string;
+  role_id?: string;
 }
 class UpdateUserDto {
   username?: string;
   password?: string;
-  roleId?: string;
+  first_name?: string;
+  last_name?: string;
+  number?: string;
+  gender?: Gender;
+  tel?: string;
+  address?: string;
+  status?: UserStatus;
+  profile?: string;
+  role_id?: string;
 }
+
+import { UserQueryDto } from './dto/user-query.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly service: UsersService) {}
+  constructor(private readonly service: UsersService) { }
 
   @Post()
   @UseGuards(PermissionsGuard)
@@ -60,7 +79,9 @@ export class UsersController {
   @ApiOperation({ summary: 'List users (paginated)' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
-  async findAll(@Query() query: PaginationQueryDto) {
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  async findAll(@Query(ValidationPipe) query: UserQueryDto) {
     const result = await this.service.findAll(query);
     return handleSuccessPaginated({
       data: result.data,

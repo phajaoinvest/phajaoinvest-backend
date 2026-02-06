@@ -23,7 +23,7 @@ export class RolesService {
     private readonly rolePermissionRepo: Repository<RolePermission>,
     @InjectRepository(Permission)
     private readonly permissionRepo: Repository<Permission>,
-  ) {}
+  ) { }
 
   async create(dto: CreateRoleDto) {
     const entity = this.repo.create(dto);
@@ -37,6 +37,7 @@ export class RolesService {
     const [data, total] = await this.repo.findAndCount({
       take: limit,
       skip: (page - 1) * limit,
+      relations: ['rolePermissions'],
       order: { created_at: 'DESC' },
     });
     const totalPages = Math.ceil(total / limit) || 1;
@@ -148,6 +149,56 @@ export class RolesService {
     }
 
     return results;
+  }
+
+  async syncPermissions(roleId: string, permissionIds: string[]) {
+    // Verify role exists
+    await this.findOne(roleId);
+
+    // Get current permissions
+    const currentMappings = await this.rolePermissionRepo.find({
+      where: { role_id: roleId },
+    });
+    const currentIds = currentMappings.map((m) => m.permission_id);
+
+    // To remove: currently assigned but NOT in the new list
+    const toRemove = currentMappings.filter(
+      (m) => !permissionIds.includes(m.permission_id),
+    );
+
+    // To add: in the new list but NOT currently assigned
+    const toAdd = permissionIds.filter((id) => !currentIds.includes(id));
+
+    // Remove old ones
+    if (toRemove.length > 0) {
+      await this.rolePermissionRepo.remove(toRemove);
+    }
+
+    // Add new ones
+    const addResults: {
+      id: string;
+      success: boolean;
+      result?: RolePermission;
+      error?: string;
+    }[] = [];
+    for (const id of toAdd) {
+      try {
+        const result = await this.assignPermission(roleId, id);
+        addResults.push({ id, success: true, result });
+      } catch (error) {
+        addResults.push({
+          id,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return {
+      removed: toRemove.length,
+      added: addResults.filter((r) => r.success).length,
+      errors: addResults.filter((r) => !r.success),
+    };
   }
 
   async removeMultiplePermissions(roleId: string, permissionIds: string[]) {

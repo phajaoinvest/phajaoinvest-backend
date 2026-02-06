@@ -413,7 +413,7 @@ export class CustomersService {
     private readonly paymentService: PaymentProvider,
     private readonly paymentRecordService: PaymentRecordService,
     private readonly paymentAuditService: PaymentAuditService,
-  ) {}
+  ) { }
 
   async create(dto: CreateCustomerDto) {
     const entity = this.repo.create(dto);
@@ -431,7 +431,7 @@ export class CustomersService {
       where: { status: CustomerStatus.INACTIVE },
     });
     const suspendedCount = await this.repo.count({
-      where: { status: CustomerStatus.BAN },
+      where: { status: CustomerStatus.SUSPENDED },
     });
 
     return {
@@ -515,15 +515,15 @@ export class CustomersService {
     const services =
       customerIds.length > 0
         ? await this.customerServiceRepo.find({
-            where: { customer_id: In(customerIds), active: true },
-            select: [
-              'id',
-              'customer_id',
-              'service_type',
-              'active',
-              'applied_at',
-            ],
-          })
+          where: { customer_id: In(customerIds), active: true },
+          select: [
+            'id',
+            'customer_id',
+            'service_type',
+            'active',
+            'applied_at',
+          ],
+        })
         : [];
 
     // Group services by customer
@@ -1051,58 +1051,58 @@ export class CustomersService {
       autoApprove?: boolean; // Auto-approve without KYC requirements
     }
   > = {
-    [CustomerServiceType.PREMIUM_MEMBERSHIP]: {
-      level: KycLevel.BASIC,
-      requiredFields: [],
-      requiredDocs: [],
-      requiresPayment: true,
-      requiresAdminApproval: true,
-      subscriptionBased: true,
-    },
-    [CustomerServiceType.PREMIUM_STOCK_PICKS]: {
-      level: KycLevel.BASIC,
-      requiredFields: [],
-      requiredDocs: [],
-      requiresPayment: false,
-      requiresAdminApproval: false,
-      subscriptionBased: false,
-      autoApprove: true, // Auto-approve without KYC for new customers
-    },
-    [CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT]: {
-      level: KycLevel.BROKERAGE,
-      requiredFields: [
-        'dob',
-        'nationality',
-        'employment_status',
-        'annual_income',
-        'investment_experience',
-        'source_of_funds',
-        'risk_tolerance',
-      ],
-      requiredDocs: [
-        CustomerDocumentType.IDENTITY_FRONT,
-        CustomerDocumentType.IDENTITY_BACK,
-        CustomerDocumentType.BANK_STATEMENT,
-      ],
-      requiresAdminApproval: true, // Requires admin approval after KYC submission
-    },
-    [CustomerServiceType.GUARANTEED_RETURNS]: {
-      level: KycLevel.ADVANCED,
-      requiredFields: [
-        'dob',
-        'nationality',
-        'employment_status',
-        'annual_income',
-        'investment_experience',
-      ],
-      requiredDocs: [
-        CustomerDocumentType.IDENTITY_FRONT,
-        CustomerDocumentType.IDENTITY_BACK,
-        CustomerDocumentType.BANK_STATEMENT,
-      ],
-      requiresAdminApproval: true, // Requires admin approval after KYC submission
-    },
-  };
+      [CustomerServiceType.PREMIUM_MEMBERSHIP]: {
+        level: KycLevel.BASIC,
+        requiredFields: [],
+        requiredDocs: [],
+        requiresPayment: true,
+        requiresAdminApproval: true,
+        subscriptionBased: true,
+      },
+      [CustomerServiceType.PREMIUM_STOCK_PICKS]: {
+        level: KycLevel.BASIC,
+        requiredFields: [],
+        requiredDocs: [],
+        requiresPayment: false,
+        requiresAdminApproval: false,
+        subscriptionBased: false,
+        autoApprove: true, // Auto-approve without KYC for new customers
+      },
+      [CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT]: {
+        level: KycLevel.BROKERAGE,
+        requiredFields: [
+          'dob',
+          'nationality',
+          'employment_status',
+          'annual_income',
+          'investment_experience',
+          'source_of_funds',
+          'risk_tolerance',
+        ],
+        requiredDocs: [
+          CustomerDocumentType.IDENTITY_FRONT,
+          CustomerDocumentType.IDENTITY_BACK,
+          CustomerDocumentType.BANK_STATEMENT,
+        ],
+        requiresAdminApproval: true, // Requires admin approval after KYC submission
+      },
+      [CustomerServiceType.GUARANTEED_RETURNS]: {
+        level: KycLevel.ADVANCED,
+        requiredFields: [
+          'dob',
+          'nationality',
+          'employment_status',
+          'annual_income',
+          'investment_experience',
+        ],
+        requiredDocs: [
+          CustomerDocumentType.IDENTITY_FRONT,
+          CustomerDocumentType.IDENTITY_BACK,
+          CustomerDocumentType.BANK_STATEMENT,
+        ],
+        requiresAdminApproval: true, // Requires admin approval after KYC submission
+      },
+    };
 
   async listServices(customerId: string) {
     return this.customerServiceRepo.find({
@@ -2727,7 +2727,7 @@ export class CustomersService {
         const service = payment.service;
         const base =
           service.subscription_expires_at &&
-          service.subscription_expires_at > now
+            service.subscription_expires_at > now
             ? service.subscription_expires_at
             : now;
         let subscriptionExpiresAt = service.subscription_expires_at;
@@ -3182,8 +3182,8 @@ export class CustomersService {
     });
     const packageRecord = service.subscription_package_id
       ? await this.subscriptionPackageRepo.findOne({
-          where: { id: service.subscription_package_id },
-        })
+        where: { id: service.subscription_package_id },
+      })
       : null;
 
     const toNumber = (value: string | number | null | undefined) =>
@@ -3226,15 +3226,15 @@ export class CustomersService {
       },
       package: packageRecord
         ? {
-            id: packageRecord.id,
-            service_type: packageRecord.service_type,
-            duration_months: packageRecord.duration_months,
-            price: Number(packageRecord.price),
-            currency: packageRecord.currency,
-            description: packageRecord.description,
-            features: packageRecord.features,
-            active: packageRecord.active,
-          }
+          id: packageRecord.id,
+          service_type: packageRecord.service_type,
+          duration_months: packageRecord.duration_months,
+          price: Number(packageRecord.price),
+          currency: packageRecord.currency,
+          description: packageRecord.description,
+          features: packageRecord.features,
+          active: packageRecord.active,
+        }
         : null,
       addresses: addresses.map((addr) => ({
         id: addr.id,
@@ -3498,11 +3498,11 @@ export class CustomersService {
       applied_at: service.applied_at,
       kyc_info: service.kyc
         ? {
-            kyc_id: service.kyc.id,
-            kyc_level: service.kyc.kyc_level,
-            kyc_status: service.kyc.status,
-            reviewed_at: service.kyc.reviewed_at,
-          }
+          kyc_id: service.kyc.id,
+          kyc_level: service.kyc.kyc_level,
+          kyc_status: service.kyc.status,
+          reviewed_at: service.kyc.reviewed_at,
+        }
         : undefined,
     }));
 
@@ -3584,20 +3584,20 @@ export class CustomersService {
           applied_at: service.applied_at,
           kyc_info: service.kyc
             ? {
-                kyc_id: service.kyc.id,
-                kyc_level: service.kyc.kyc_level,
-                kyc_status: service.kyc.status,
-                reviewed_at: service.kyc.reviewed_at,
-              }
+              kyc_id: service.kyc.id,
+              kyc_level: service.kyc.kyc_level,
+              kyc_status: service.kyc.status,
+              reviewed_at: service.kyc.reviewed_at,
+            }
             : undefined,
           payment_info: latestPayment
             ? {
-                payment_id: latestPayment.id,
-                amount: latestPayment.amount,
-                paid_at: latestPayment.paid_at,
-                status: latestPayment.status,
-                payment_slip_url: latestPayment.payment_slip_url || undefined,
-              }
+              payment_id: latestPayment.id,
+              amount: latestPayment.amount,
+              paid_at: latestPayment.paid_at,
+              status: latestPayment.status,
+              payment_slip_url: latestPayment.payment_slip_url || undefined,
+            }
             : undefined,
         };
       }),
@@ -3640,12 +3640,12 @@ export class CustomersService {
         // Get payment info if service requires payment
         let paymentInfo:
           | {
-              payment_id: string;
-              amount: number;
-              paid_at: Date | null;
-              status: PaymentStatus;
-              payment_slip_url?: string;
-            }
+            payment_id: string;
+            amount: number;
+            paid_at: Date | null;
+            status: PaymentStatus;
+            payment_slip_url?: string;
+          }
           | undefined;
         if (service.requires_payment) {
           const payments = await this.paymentRepo.find({
@@ -3686,11 +3686,11 @@ export class CustomersService {
           applied_at: service.applied_at,
           kyc_info: service.kyc
             ? {
-                kyc_id: service.kyc.id,
-                kyc_level: service.kyc.kyc_level,
-                kyc_status: service.kyc.status,
-                reviewed_at: service.kyc.reviewed_at,
-              }
+              kyc_id: service.kyc.id,
+              kyc_level: service.kyc.kyc_level,
+              kyc_status: service.kyc.status,
+              reviewed_at: service.kyc.reviewed_at,
+            }
             : undefined,
           payment_info: paymentInfo,
         };

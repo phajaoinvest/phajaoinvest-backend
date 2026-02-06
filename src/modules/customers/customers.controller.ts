@@ -68,7 +68,7 @@ class UpdateCustomerStatusDto {
 @UseGuards(JwtAuthGuard)
 @Controller('customers')
 export class CustomersController {
-  constructor(private readonly service: CustomersService) {}
+  constructor(private readonly service: CustomersService) { }
 
   @Post()
   @UseGuards(PermissionsGuard)
@@ -228,7 +228,7 @@ export class CustomersController {
     if (user.type !== 'user') {
       throw new ForbiddenException('Only admins can ban customers');
     }
-    const data = await this.service.updateStatus(id, CustomerStatus.BAN);
+    const data = await this.service.updateStatus(id, CustomerStatus.SUSPENDED);
     return handleSuccessOne({
       data,
       message: 'Customer banned successfully',

@@ -54,7 +54,7 @@ class AssignMultiplePermissionsDto {
 @UseGuards(JwtAuthGuard)
 @Controller('roles')
 export class RolesController {
-  constructor(private readonly service: RolesService) {}
+  constructor(private readonly service: RolesService) { }
 
   @Post()
   @UseGuards(PermissionsGuard)
@@ -213,5 +213,23 @@ export class RolesController {
       dto.permission_ids,
     );
     return handleSuccessOne({ data, message: 'Permissions removal complete' });
+  }
+
+  @Post(':id/permissions/sync')
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('roles:update')
+  @ApiOperation({ summary: 'Sync permissions for a role (add/remove to match list)' })
+  @ApiParam({ name: 'id', description: 'Role ID' })
+  @ApiBody({ type: AssignMultiplePermissionsDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Permissions synchronized successfully',
+  })
+  async syncPermissions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(ValidationPipe) dto: AssignMultiplePermissionsDto,
+  ) {
+    const data = await this.service.syncPermissions(id, dto.permission_ids);
+    return handleSuccessOne({ data, message: 'Permissions synchronized' });
   }
 }
