@@ -4,6 +4,7 @@ import {
   Param,
   Query,
   Logger,
+  UseGuards,
   // UseGuards,
 } from '@nestjs/common';
 import {
@@ -24,22 +25,22 @@ import {
   handleError,
   handleSuccessOne,
 } from '../../../common/utils/response.util';
-// import { RequiredServiceGuard } from '../../../common/guards/required-service.guard';
-// import { RequiresService } from '../../../common/decorators/requires-service.decorator';
-// import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
-// import { JwtCustomerAuthGuard } from 'src/modules/auth/guards/jwt-customer.guard';
+import { RequiredServiceGuard } from '../../../common/guards/required-service.guard';
+import { RequiresService } from '../../../common/decorators/requires-service.decorator';
+import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
+import { JwtCustomerAuthGuard } from 'src/modules/auth/guards/jwt-customer.guard';
 
 @ApiTags('technical Indicators')
 @ApiBearerAuth()
-// @UseGuards(JwtCustomerAuthGuard, RequiredServiceGuard)
-// @RequiresService(CustomerServiceType.PREMIUM_MEMBERSHIP)
+@UseGuards(JwtCustomerAuthGuard, RequiredServiceGuard)
+@RequiresService(CustomerServiceType.PREMIUM_MEMBERSHIP)
 @Controller('technical-indicators')
 export class TechnicalIndicatorsController {
   private readonly logger = new Logger(TechnicalIndicatorsController.name);
 
   constructor(
     private readonly technicalIndicatorsService: TechnicalIndicatorsService,
-  ) {}
+  ) { }
 
   @Get(':symbol/rsi')
   @ApiOperation({
