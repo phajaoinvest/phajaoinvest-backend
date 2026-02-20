@@ -89,6 +89,14 @@ export class ApplyPremiumMembershipDto {
   @Type(() => SubscriptionPackageDto)
   subscription?: SubscriptionPackageDto;
 
+  @ApiPropertyOptional({
+    description: 'Coupon code for discount',
+    example: 'PROMO20',
+  })
+  @IsOptional()
+  @IsString()
+  coupon_code?: string;
+
   @ApiProperty({
     description: 'Payment slip information (required for application)',
     type: SubmitPaymentSlipDto,
@@ -171,6 +179,14 @@ export class RenewSubscriptionDto {
   @ValidateNested()
   @Type(() => SubscriptionPackageDto)
   subscription: SubscriptionPackageDto;
+
+  @ApiPropertyOptional({
+    description: 'Coupon code for discount',
+    example: 'PROMO20',
+  })
+  @IsOptional()
+  @IsString()
+  coupon_code?: string;
 }
 
 export class PaymentInfoDto {

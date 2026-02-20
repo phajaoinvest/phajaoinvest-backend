@@ -29,6 +29,7 @@ import { InvestmentInfoModule } from './modules/investment-info/investment-info.
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { CouponsModule } from './modules/coupons/coupons.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { SettingsModule } from './modules/settings/settings.module';
       inject: [ConfigService],
     }),
     NotificationsModule,
+    CouponsModule,
     AuthModule,
     StocksModule,
     InvestTypesModule,
@@ -70,4 +72,4 @@ import { SettingsModule } from './modules/settings/settings.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

@@ -83,7 +83,7 @@ export class CustomerServicesController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly notificationsService: NotificationsService,
-  ) {}
+  ) { }
 
   @UseGuards(JwtCustomerAuthGuard)
   @Get('list')
@@ -141,23 +141,23 @@ export class CustomerServicesController {
 
     const kycPayload: Partial<CustomerKyc> | undefined = dto.kyc
       ? {
-          dob: dto.kyc.dob ? new Date(dto.kyc.dob) : undefined,
-          nationality: dto.kyc.nationality,
-          marital_status: dto.kyc.marital_status as MaritalStatus | undefined,
-          employment_status: dto.kyc.employment_status as
-            | EmploymentStatus
-            | undefined,
-          annual_income: dto.kyc.annual_income,
-          employer_name: dto.kyc.employer_name,
-          occupation: dto.kyc.occupation,
-          investment_experience: dto.kyc.investment_experience,
-          dependent_number: dto.kyc.dependent_number,
-          source_of_funds: dto.kyc.source_of_funds,
-          risk_tolerance: dto.kyc.risk_tolerance as RiskTolerance | undefined,
-          pep_flag: dto.kyc.pep_flag,
-          tax_id: dto.kyc.tax_id,
-          fatca_status: dto.kyc.fatca_status,
-        }
+        dob: dto.kyc.dob ? new Date(dto.kyc.dob) : undefined,
+        nationality: dto.kyc.nationality,
+        marital_status: dto.kyc.marital_status as MaritalStatus | undefined,
+        employment_status: dto.kyc.employment_status as
+          | EmploymentStatus
+          | undefined,
+        annual_income: dto.kyc.annual_income,
+        employer_name: dto.kyc.employer_name,
+        occupation: dto.kyc.occupation,
+        investment_experience: dto.kyc.investment_experience,
+        dependent_number: dto.kyc.dependent_number,
+        source_of_funds: dto.kyc.source_of_funds,
+        risk_tolerance: dto.kyc.risk_tolerance as RiskTolerance | undefined,
+        pep_flag: dto.kyc.pep_flag,
+        tax_id: dto.kyc.tax_id,
+        fatca_status: dto.kyc.fatca_status,
+      }
       : undefined;
 
     const result: ApplyServiceResult = await this.customersService.applyService(
@@ -583,6 +583,7 @@ export class CustomerServicesController {
         user.sub,
         dto.package_id,
         dto.payment_slip,
+        dto.coupon_code,
       );
 
     // Send notification to admin for premium membership application
@@ -613,6 +614,32 @@ export class CustomerServicesController {
       },
       message:
         'Premium membership application with payment slip submitted successfully. Pending admin review.',
+    });
+  }
+
+  @Post('premium-membership/redeem-coupon')
+  @UseGuards(JwtCustomerAuthGuard)
+  @ApiOperation({
+    summary: 'Redeem a coupon for premium membership',
+    description: 'Redeems a coupon that grants a specific duration of premium membership instantly.',
+  })
+  async redeemCoupon(
+    @Body('code') code: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'customer') {
+      throw new ForbiddenException('Only customers can redeem coupons');
+    }
+
+    if (!code) {
+      throw new BadRequestException('Coupon code is required');
+    }
+
+    const result = await this.customersService.redeemPremiumMembershipCoupon(user.sub, code);
+
+    return handleSuccessOne({
+      data: result,
+      message: result.message,
     });
   }
 
@@ -864,10 +891,10 @@ export class CustomerServicesController {
     const formatDate = (d?: Date | null) =>
       d
         ? new Date(d).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          })
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })
         : null;
     const formatMoney = (amount: number, currency = 'USD') =>
       new Intl.NumberFormat('en-US', {

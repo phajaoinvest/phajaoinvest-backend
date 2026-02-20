@@ -25,6 +25,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { SubscriptionPackage } from '../subscription-packages/entities/subscription-package.entity';
 import { getJwtConfig } from '../../config/jwt.config';
 import { ServiceFundTransaction } from './entities/service-fund-transaction.entity';
+import { CouponsModule } from '../coupons/coupons.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { ServiceFundTransaction } from './entities/service-fund-transaction.enti
     PaymentsModule,
     SubscriptionPackagesModule,
     NotificationsModule,
+    CouponsModule,
   ],
   controllers: [CustomersController, CustomerServicesController],
   providers: [
@@ -61,4 +63,4 @@ import { ServiceFundTransaction } from './entities/service-fund-transaction.enti
   ],
   exports: [CustomersService],
 })
-export class CustomersModule {}
+export class CustomersModule { }

@@ -67,6 +67,7 @@ import {
   PaymentAuditLevel,
 } from '../payments/entities/payment-audit-log.entity';
 import { SubscriptionPackagesService } from '../subscription-packages/subscription-packages.service';
+import { CouponsService } from '../coupons/coupons.service';
 import { SubscriptionPackage } from '../subscription-packages/entities/subscription-package.entity';
 import {
   ServiceFundTransaction,
@@ -413,6 +414,7 @@ export class CustomersService {
     private readonly paymentService: PaymentProvider,
     private readonly paymentRecordService: PaymentRecordService,
     private readonly paymentAuditService: PaymentAuditService,
+    private readonly couponsService: CouponsService,
   ) { }
 
   async create(dto: CreateCustomerDto) {
@@ -2464,6 +2466,7 @@ export class CustomersService {
       payment_amount: number;
       payment_reference?: string;
     },
+    couponCode?: string,
   ) {
     // 1) Block if there is any unapproved/pending application (any package)
     const approvableStatuses = [
@@ -2506,7 +2509,22 @@ export class CustomersService {
       );
     }
 
-    const fee = Number(pkg.price);
+    let fee = Number(pkg.price);
+    let discountAmount = 0;
+    let couponId: string | undefined;
+
+    if (couponCode) {
+      const coupon = await this.couponsService.validateCoupon(
+        couponCode,
+        CustomerServiceType.PREMIUM_MEMBERSHIP,
+        fee,
+        customerId,
+      );
+      const calculation = this.couponsService.calculateDiscount(coupon, fee);
+      fee = calculation.final_amount;
+      discountAmount = calculation.discount_amount;
+      couponId = coupon.id;
+    }
 
     // 2) If applying different package while current subscription not expired -> block
     const now = new Date();
@@ -2622,6 +2640,15 @@ export class CustomersService {
       };
       const paymentRecord = await paymentRepo.save(paymentEntity);
 
+      if (couponId) {
+        await this.couponsService.recordUsage(
+          couponId,
+          customerId,
+          discountAmount,
+          paymentRecord.id,
+        );
+      }
+
       return {
         status: 'pending',
         service: targetService,
@@ -2633,6 +2660,117 @@ export class CustomersService {
           submitted_at: paymentRecord.payment_slip_submitted_at,
           instructions: 'Payment recorded and pending admin review.',
         },
+      };
+    });
+  }
+
+  async redeemPremiumMembershipCoupon(customerId: string, code: string) {
+    const coupon = await this.couponsService.validateCoupon(
+      code,
+      CustomerServiceType.PREMIUM_MEMBERSHIP,
+      0, // Amount 0 for redemption
+      customerId,
+    );
+
+    const durationMonths = coupon.duration_months;
+    if (!durationMonths) {
+      throw new BadRequestException(
+        'This coupon does not grant a specific duration. Please use it during the regular application flow.',
+      );
+    }
+
+    return await this.dataSource.transaction(async (manager) => {
+      const serviceRepo = manager.getRepository(CustomerService);
+      const paymentRepo = manager.getRepository(Payment);
+
+      const latestService = await serviceRepo.findOne({
+        where: {
+          customer_id: customerId,
+          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        },
+        order: { applied_at: 'DESC' },
+      });
+
+      const now = new Date();
+      let subscriptionExpiresAt: Date;
+      let targetService: CustomerService;
+
+      if (!latestService) {
+        subscriptionExpiresAt = new Date(now);
+        subscriptionExpiresAt.setMonth(
+          subscriptionExpiresAt.getMonth() + durationMonths,
+        );
+
+        targetService = serviceRepo.create({
+          customer_id: customerId,
+          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+          active: true,
+          status: SubscriptionStatus.ACTIVE,
+          requires_payment: false,
+          subscription_duration: durationMonths as any,
+          subscription_fee: 0,
+          subscription_expires_at: subscriptionExpiresAt,
+        });
+        targetService = await serviceRepo.save(targetService);
+      } else {
+        const base =
+          latestService.active &&
+            latestService.subscription_expires_at &&
+            latestService.subscription_expires_at > now
+            ? latestService.subscription_expires_at
+            : now;
+
+        subscriptionExpiresAt = new Date(base);
+        subscriptionExpiresAt.setMonth(
+          subscriptionExpiresAt.getMonth() + durationMonths,
+        );
+
+        await serviceRepo.update(latestService.id, {
+          active: true,
+          status: SubscriptionStatus.ACTIVE,
+          subscription_duration: durationMonths as any,
+          subscription_fee: 0,
+          subscription_expires_at: subscriptionExpiresAt,
+        });
+
+        targetService = {
+          ...latestService,
+          active: true,
+          status: SubscriptionStatus.ACTIVE,
+          subscription_duration: durationMonths,
+          subscription_expires_at: subscriptionExpiresAt,
+        } as any;
+      }
+
+      // Record a "free" payment for tracking
+      const paymentId = `coupon-redeem-${Date.now()}-${customerId}`;
+      const paymentRecord = await paymentRepo.save({
+        customer_id: customerId,
+        service_id: targetService.id,
+        payment_type: PaymentType.SUBSCRIPTION,
+        payment_method: PaymentMethod.MANUAL_TRANSFER, // Use manual or add RECOUPON
+        amount: 0,
+        currency: 'USD',
+        status: PaymentStatus.SUCCEEDED,
+        description: `Premium Membership - ${durationMonths} months (Coupon Redemption: ${code})`,
+        payment_intent_id: paymentId,
+        external_payment_id: paymentId,
+        paid_at: now,
+        approved_at: now,
+      });
+
+      await this.couponsService.recordUsage(
+        coupon.id,
+        customerId,
+        0,
+        paymentRecord.id,
+      );
+
+      return {
+        status: 'success',
+        message: `Coupon redeemed successfully. ${coupon.duration_months} months of Premium Membership granted.`,
+        service: targetService,
+        subscription_expires_at: subscriptionExpiresAt,
       };
     });
   }
