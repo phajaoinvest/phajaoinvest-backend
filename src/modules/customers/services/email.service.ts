@@ -53,7 +53,6 @@ export class NodemailerEmailService implements EmailService {
         html: options.html,
         text: options.text,
       };
-      console.log({ mailOptions });
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const info: { messageId?: string } =

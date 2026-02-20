@@ -5,10 +5,13 @@ import {
     CreateDateColumn,
     UpdateDateColumn,
     OneToMany,
+    ManyToOne,
+    JoinColumn,
     Index,
 } from 'typeorm';
 import type { CouponUsage } from './coupon-usage.entity';
 import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
+import { SubscriptionPackage } from '../../subscription-packages/entities/subscription-package.entity';
 
 export enum CouponDiscountType {
     PERCENTAGE = 'percentage',
@@ -23,6 +26,9 @@ export class Coupon {
     @Column({ unique: true })
     @Index('idx_coupon_code')
     code: string;
+
+    @Column({ type: 'text', nullable: true })
+    description: string | null;
 
     @Column({
         type: 'enum',
@@ -55,16 +61,12 @@ export class Coupon {
     @Column({ type: 'boolean', default: true })
     active: boolean;
 
-    @Column({ type: 'int', nullable: true, comment: 'Number of months this coupon grants (for subscription services)' })
-    duration_months: number | null;
+    @Column({ type: 'uuid', nullable: true, comment: 'ID of the subscription package this coupon grants' })
+    subscription_package_id: string | null;
 
-    @Column({
-        type: 'enum',
-        enum: CustomerServiceType,
-        array: true,
-        default: [CustomerServiceType.PREMIUM_MEMBERSHIP],
-    })
-    applicable_services: CustomerServiceType[];
+    @ManyToOne(() => SubscriptionPackage, { eager: true, nullable: true })
+    @JoinColumn({ name: 'subscription_package_id' })
+    subscription_package: SubscriptionPackage;
 
     @OneToMany('CouponUsage', (usage: CouponUsage) => usage.coupon)
     usages: CouponUsage[];

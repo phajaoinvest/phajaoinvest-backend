@@ -906,14 +906,6 @@ export class TechnicalIndicatorsService {
     from: number,
     to: number,
   ): Promise<StockPricePoint[] | null> {
-    console.log(
-      'Fetching Polygon aggregates for',
-      symbol,
-      resolution,
-      from,
-      to,
-      this.polygonApiKey,
-    );
     if (!this.polygonApiKey) {
       return null;
     }
@@ -1280,15 +1272,15 @@ export class TechnicalIndicatorsService {
     days?: number;
     mode?: 'YTD';
   }> = [
-    { label: '1D', days: 1 },
-    { label: '1W', days: 7 },
-    { label: '1M', days: 30 },
-    { label: '3M', days: 90 },
-    { label: '6M', days: 180 },
-    { label: 'YTD', mode: 'YTD' },
-    { label: '1Y', days: 365 },
-    { label: '5Y', days: 5 * 365 },
-  ];
+      { label: '1D', days: 1 },
+      { label: '1W', days: 7 },
+      { label: '1M', days: 30 },
+      { label: '3M', days: 90 },
+      { label: '6M', days: 180 },
+      { label: 'YTD', mode: 'YTD' },
+      { label: '1Y', days: 365 },
+      { label: '5Y', days: 5 * 365 },
+    ];
 
   private resolveHistoryRange(range: StockPriceHistoryRange): {
     from: number;
@@ -2579,8 +2571,6 @@ export class TechnicalIndicatorsService {
     if (!rows) {
       return null;
     }
-
-    console.log({ rows });
 
     const transformed = rows
       .map((row) => this.mapGoogleSupportBreakRow(row))

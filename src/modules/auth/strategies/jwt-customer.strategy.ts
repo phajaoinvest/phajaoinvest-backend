@@ -13,7 +13,6 @@ export class JwtCustomerStrategy extends PassportStrategy(
   constructor(private readonly config: ConfigService) {
     const fallback = config.get<string>('JWT_SECRET', 'your-secret-key');
     const secret = config.get<string>('JWT_CUSTOMER_SECRET') || fallback;
-    console.log({ secret });
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,

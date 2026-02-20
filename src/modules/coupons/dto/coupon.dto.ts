@@ -13,11 +13,17 @@ import {
 import { CouponDiscountType } from '../entities/coupon.entity';
 import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
 import { Type } from 'class-transformer';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class CreateCouponDto {
     @ApiProperty({ description: 'Coupon code', example: 'PROMO20' })
     @IsString()
     code: string;
+
+    @ApiPropertyOptional({ description: 'Description of the coupon' })
+    @IsOptional()
+    @IsString()
+    description?: string;
 
     @ApiProperty({
         description: 'Discount type',
@@ -60,30 +66,32 @@ export class CreateCouponDto {
     @Min(1)
     usage_limit?: number;
 
-    @ApiPropertyOptional({ description: 'Number of months this coupon grants', example: 1 })
+    @ApiPropertyOptional({ description: 'ID of the subscription package this coupon grants' })
     @IsOptional()
-    @IsNumber()
-    @Min(1)
-    duration_months?: number;
+    @IsUUID()
+    subscription_package_id?: string;
 
     @ApiPropertyOptional({ description: 'Is coupon active', default: true })
     @IsOptional()
     @IsBoolean()
     active?: boolean;
-
-    @ApiPropertyOptional({
-        description: 'Applicable services',
-        enum: CustomerServiceType,
-        isArray: true,
-        example: [CustomerServiceType.PREMIUM_MEMBERSHIP],
-    })
-    @IsOptional()
-    @IsArray()
-    @IsEnum(CustomerServiceType, { each: true })
-    applicable_services?: CustomerServiceType[];
 }
 
 export class UpdateCouponDto extends PartialType(CreateCouponDto) { }
+
+export class CouponFilterDto extends PaginationQueryDto {
+    @ApiPropertyOptional({ description: 'Search by coupon code or description' })
+    @IsOptional()
+    @IsString()
+    search?: string;
+
+    @ApiPropertyOptional({ description: 'Filter by active status' })
+    @IsOptional()
+    @IsBoolean()
+    @Type(() => Boolean)
+    active?: boolean;
+}
+
 export class ValidateCouponDto {
     @ApiProperty({ description: 'Coupon code', example: 'PROMO20' })
     @IsString()
@@ -105,6 +113,7 @@ export class ValidateCouponDto {
 export class CouponResponseDto {
     id: string;
     code: string;
+    description: string | null;
     discount_type: CouponDiscountType;
     discount_value: number;
     min_purchase_amount: number | null;
@@ -113,9 +122,8 @@ export class CouponResponseDto {
     valid_until: Date | null;
     usage_limit: number | null;
     usage_count: number;
-    duration_months: number | null;
+    subscription_package_id: string | null;
     active: boolean;
-    applicable_services: CustomerServiceType[];
     created_at: Date;
     updated_at: Date;
 }

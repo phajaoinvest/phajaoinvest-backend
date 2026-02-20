@@ -12,8 +12,10 @@ import {
     UpdateCouponDto,
     ValidateCouponDto,
     CalculatedDiscountDto,
+    CouponFilterDto,
 } from './dto/coupon.dto';
 import { CustomerServiceType } from '../customers/entities/customer-service.entity';
+import { PaginationUtil, PaginatedResult } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class CouponsService {
@@ -39,8 +41,35 @@ export class CouponsService {
         return this.couponRepo.save(coupon);
     }
 
-    async findAll(): Promise<Coupon[]> {
-        return this.couponRepo.find({ order: { created_at: 'DESC' } });
+    async findAll(filter: CouponFilterDto): Promise<PaginatedResult<Coupon>> {
+        const { page, limit, skip } = PaginationUtil.calculatePagination({
+            page: filter.page,
+            limit: filter.limit,
+            defaultLimit: 10,
+            maxLimit: 100,
+        });
+
+        const qb = this.couponRepo.createQueryBuilder('coupon');
+
+        if (filter.search) {
+            qb.where('coupon.code ILIKE :search OR coupon.description ILIKE :search', {
+                search: `%${filter.search}%`,
+            });
+        }
+
+        if (filter.active !== undefined) {
+            qb.andWhere('coupon.active = :active', { active: filter.active });
+        }
+
+        qb.leftJoinAndSelect('coupon.subscription_package', 'subscription_package');
+
+        const [data, total] = await qb
+            .orderBy(`coupon.${filter.sort || 'created_at'}`, filter.order || 'DESC')
+            .skip(skip)
+            .take(limit)
+            .getManyAndCount();
+
+        return PaginationUtil.createPaginatedResult(data, total, { page, limit });
     }
 
     async findOne(id: string): Promise<Coupon> {
@@ -95,8 +124,8 @@ export class CouponsService {
             throw new BadRequestException('Coupon usage limit reached');
         }
 
-        if (!coupon.applicable_services.includes(serviceType)) {
-            throw new BadRequestException(`Coupon is not applicable for ${serviceType}`);
+        if (serviceType !== CustomerServiceType.PREMIUM_MEMBERSHIP) {
+            throw new BadRequestException(`Coupons currently only apply to ${CustomerServiceType.PREMIUM_MEMBERSHIP}`);
         }
 
         if (coupon.min_purchase_amount !== null && amount < Number(coupon.min_purchase_amount)) {

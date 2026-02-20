@@ -10,6 +10,7 @@ import {
     ValidationPipe,
     ParseUUIDPipe,
     ForbiddenException,
+    Query,
 } from '@nestjs/common';
 import {
     ApiBearerAuth,
@@ -25,8 +26,8 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 import { CouponsService } from './coupons.service';
-import { CreateCouponDto, UpdateCouponDto } from './dto/coupon.dto';
-import { handleSuccessOne } from '../../common/utils/response.util';
+import { CreateCouponDto, UpdateCouponDto, CouponFilterDto } from './dto/coupon.dto';
+import { handleSuccessOne, handleSuccessPaginated } from '../../common/utils/response.util';
 
 @ApiTags('Admin Coupons')
 @ApiBearerAuth()
@@ -55,11 +56,18 @@ export class AdminCouponsController {
     @Get()
     @Permissions('coupons:read')
     @ApiOperation({ summary: 'List all coupons' })
-    async findAll(@AuthUser() user: JwtPayload) {
+    async findAll(
+        @Query(ValidationPipe) filter: CouponFilterDto,
+        @AuthUser() user: JwtPayload,
+    ) {
         if (user.type !== 'user') throw new ForbiddenException();
-        const data = await this.service.findAll();
-        return handleSuccessOne({
-            data,
+        const result = await this.service.findAll(filter);
+        return handleSuccessPaginated({
+            data: result.data,
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages,
             message: 'Coupons retrieved successfully',
         });
     }

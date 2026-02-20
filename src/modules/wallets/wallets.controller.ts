@@ -52,7 +52,7 @@ export class WalletsController {
   constructor(
     private readonly service: WalletsService,
     private readonly customersService: CustomersService,
-  ) {}
+  ) { }
 
   @Get('me')
   @ApiOperation({ summary: 'Get my wallet (customer authenticated)' })
@@ -106,11 +106,11 @@ export class WalletsController {
     )) as Array<{ service_type: CustomerServiceType; active?: boolean }>;
     const hasInternationalAccount = Array.isArray(services)
       ? services.some(
-          (s) =>
-            s.service_type ===
-              CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT &&
-            s.active === true,
-        )
+        (s) =>
+          s.service_type ===
+          CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT &&
+          s.active === true,
+      )
       : false;
     if (!hasInternationalAccount) {
       throw new ForbiddenException(
@@ -191,7 +191,6 @@ export class WalletsController {
     @Body(ValidationPipe) body: RejectTopupDto,
     @AuthUser() user: JwtPayload,
   ) {
-    console.log({ user });
     if (!user || user.type !== 'user') {
       return handleSuccessOne({ data: null, message: 'Forbidden' });
     }

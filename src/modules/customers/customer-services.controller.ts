@@ -623,6 +623,19 @@ export class CustomerServicesController {
     summary: 'Redeem a coupon for premium membership',
     description: 'Redeems a coupon that grants a specific duration of premium membership instantly.',
   })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'The coupon code to redeem',
+          example: 'PROMO2026',
+        },
+      },
+      required: ['code'],
+    },
+  })
   async redeemCoupon(
     @Body('code') code: string,
     @AuthUser() user: JwtPayload,

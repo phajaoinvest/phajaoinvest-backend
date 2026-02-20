@@ -28,7 +28,7 @@ export class RequiredServiceGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly customersService: CustomersService,
-  ) {}
+  ) { }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const required = this.reflector.getAllAndOverride<CustomerServiceType>(
@@ -50,17 +50,15 @@ export class RequiredServiceGuard implements CanActivate {
     )) as MinimalCustomerService[];
     const now = new Date();
 
-    console.log({ services });
-
     const ok = Array.isArray(services)
       ? services.some((service) => {
-          if (service.service_type !== required) return false;
-          if (!service.active) return false;
+        if (service.service_type !== required) return false;
+        if (!service.active) return false;
 
-          if (!service.subscription_expires_at) return true;
-          const expires = new Date(service.subscription_expires_at);
-          return Number.isFinite(expires.getTime()) && expires > now;
-        })
+        if (!service.subscription_expires_at) return true;
+        const expires = new Date(service.subscription_expires_at);
+        return Number.isFinite(expires.getTime()) && expires > now;
+      })
       : false;
     if (!ok) {
       const label = SERVICE_LABELS[required] ?? 'Required customer service';

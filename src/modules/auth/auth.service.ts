@@ -78,7 +78,7 @@ export class AuthService {
     private readonly walletsService: WalletsService,
     private readonly sessionsService: SessionsService,
     private readonly customersService: CustomersService,
-  ) {}
+  ) { }
 
   /**
    * Check and update 2FA rate limiting for a user
@@ -151,7 +151,6 @@ export class AuthService {
       loginDto.password,
       user.password,
     );
-    console.log({ passwordValid });
     if (!passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }

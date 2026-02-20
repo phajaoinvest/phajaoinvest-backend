@@ -29,7 +29,7 @@ import type { JwtPayload } from '../../../common/interfaces';
 @UseGuards(JwtCustomerAuthGuard)
 @Controller('transfer-history')
 export class CustomerTransferHistoryController {
-  constructor(private readonly service: TransferHistoryService) {}
+  constructor(private readonly service: TransferHistoryService) { }
 
   @Get()
   @ApiOperation({ summary: 'List my transfers (paginated)' })
@@ -97,7 +97,6 @@ export class CustomerTransferHistoryController {
     @Param('id', ParseUUIDPipe) id: string,
     @AuthUser() user: JwtPayload,
   ) {
-    console.log({ user });
     if (user.type !== 'customer')
       throw new ForbiddenException(
         'Only customers can access their transfer history',

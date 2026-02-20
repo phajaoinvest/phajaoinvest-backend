@@ -359,7 +359,6 @@ export class ExternalPriceFetcherService {
     } catch {
       return null;
     }
-    console.log({ res });
     if (!res.ok) return null;
     let json: unknown;
     try {

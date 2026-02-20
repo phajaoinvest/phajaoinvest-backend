@@ -2672,10 +2672,10 @@ export class CustomersService {
       customerId,
     );
 
-    const durationMonths = coupon.duration_months;
+    const durationMonths = coupon.subscription_package?.duration_months;
     if (!durationMonths) {
       throw new BadRequestException(
-        'This coupon does not grant a specific duration. Please use it during the regular application flow.',
+        'This coupon does not grant a specific subscription package. Please use it during the regular application flow.',
       );
     }
 
@@ -2768,7 +2768,7 @@ export class CustomersService {
 
       return {
         status: 'success',
-        message: `Coupon redeemed successfully. ${coupon.duration_months} months of Premium Membership granted.`,
+        message: `Coupon redeemed successfully. ${durationMonths} months of Premium Membership granted.`,
         service: targetService,
         subscription_expires_at: subscriptionExpiresAt,
       };
