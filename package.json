@@ -20,7 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node scripts/seed.ts",
     "seed-packages": "ts-node -r tsconfig-paths/register scripts/seed-subscription-packages.ts",
-    "seed-user": "ts-node -r tsconfig-paths/register scripts/seed-users.ts"
+    "seed-user": "ts-node -r tsconfig-paths/register scripts/seed-users.ts",
+    "docker:build": "docker-compose down && docker system prune -f && docker-compose build --no-cache && docker-compose up -d"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
