@@ -40,7 +40,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    volumes:
+      - backups_data:/app/backups
     restart: unless-stopped
 
 volumes:
   redis_data:
+  backups_data:

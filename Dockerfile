@@ -37,6 +37,9 @@ COPY --from=base /app/package.json ./
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/dist ./dist
 
+# Create backups directory and set ownership for the entire app directory
+RUN mkdir -p /app/backups && chown -R app:app /app
+
 USER app
 
 EXPOSE 3000
