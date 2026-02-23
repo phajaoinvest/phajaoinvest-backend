@@ -9,9 +9,14 @@ import {
   Query,
   UseGuards,
   Req,
+  Res,
   ValidationPipe,
   UnauthorizedException,
+  NotFoundException,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
   ApiTags,
   ApiOperation,
@@ -36,7 +41,7 @@ import {
 @ApiTags('settings')
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(private readonly settingsService: SettingsService) { }
 
   // ============================================================================
   // User Notification Settings
@@ -280,5 +285,56 @@ export class SettingsController {
       message: 'Default settings initialized',
       statusCode: 200,
     });
+  }
+
+  @Get('database/backup/history')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get recent database backup history' })
+  @ApiResponse({
+    status: 200,
+    description: 'Backup history retrieved',
+  })
+  async getBackupHistory() {
+    const history = await this.settingsService.getBackupHistory();
+    return handleSuccessMany({
+      data: history,
+      message: 'Backup history retrieved',
+      statusCode: 200,
+    });
+  }
+
+  @Post('database/backup')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Trigger a manual database backup' })
+  @ApiResponse({
+    status: 200,
+    description: 'Manual backup initiated',
+  })
+  async triggerBackup() {
+    const backupResult = await this.settingsService.createManualBackup();
+    return handleSuccessOne({
+      data: backupResult,
+      message: 'Backup process completed',
+      statusCode: 200,
+    });
+  }
+
+  @Get('database/backup/download/:fileName')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Download a generated backup file' })
+  @ApiParam({ name: 'fileName', description: 'Name of the backup file' })
+  downloadBackup(@Param('fileName') fileName: string, @Res() res: Response) {
+    // Basic path traversal prevention
+    if (fileName.includes('..') || fileName.includes('/')) {
+      throw new NotFoundException('Invalid file name');
+    }
+    const filePath = path.join(process.cwd(), 'backups', fileName);
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Backup file not found');
+    }
+    res.download(filePath);
   }
 }

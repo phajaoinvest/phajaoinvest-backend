@@ -29,6 +29,9 @@ ENV NODE_ENV=production
 # Create non-root user
 RUN addgroup -S app && adduser -S app -G app
 
+# Install postgresql-client for backups
+RUN apk add --no-cache postgresql-client
+
 # Copy only needed artifacts
 COPY --from=base /app/package.json ./
 COPY --from=base /app/node_modules ./node_modules
