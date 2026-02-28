@@ -23,7 +23,6 @@ import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   handleSuccessPaginated,
   handleSuccessOne,

@@ -76,8 +76,18 @@ export class UsersService {
 
   // ---- CRUD for administration (used by UsersController) ----
   async create(dto: CreateUserDtoInternal): Promise<User> {
+    // Auto-generate user number if not provided
+    const number = dto.number?.trim()
+      ? dto.number
+      : `EMP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+    // Default gender to OTHER if not provided
+    const gender = dto.gender ?? Gender.OTHER;
+
     const entity = this.userRepository.create({
       ...dto,
+      number,
+      gender,
       // Only assign relation if role_id provided
       ...(dto.role_id ? { role: { id: dto.role_id } as User['role'] } : {}),
     });
