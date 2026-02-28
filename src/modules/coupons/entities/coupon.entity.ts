@@ -12,6 +12,7 @@ import {
 import type { CouponUsage } from './coupon-usage.entity';
 import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
 import { SubscriptionPackage } from '../../subscription-packages/entities/subscription-package.entity';
+import { CouponGroup } from './coupon-group.entity';
 
 export enum CouponDiscountType {
     PERCENTAGE = 'percentage',
@@ -63,6 +64,13 @@ export class Coupon {
 
     @Column({ type: 'uuid', nullable: true, comment: 'ID of the subscription package this coupon grants' })
     subscription_package_id: string | null;
+
+    @Column({ type: 'uuid', nullable: true })
+    group_id: string | null;
+
+    @ManyToOne(() => CouponGroup, (group) => group.coupons, { onDelete: 'CASCADE' })
+    @JoinColumn({ name: 'group_id' })
+    group: CouponGroup;
 
     @ManyToOne(() => SubscriptionPackage, { eager: true, nullable: true })
     @JoinColumn({ name: 'subscription_package_id' })

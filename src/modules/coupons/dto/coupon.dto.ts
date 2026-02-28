@@ -13,12 +13,25 @@ import {
 import { CouponDiscountType } from '../entities/coupon.entity';
 import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
 import { Type } from 'class-transformer';
+import { ValidateIf } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class CreateCouponDto {
     @ApiProperty({ description: 'Coupon code', example: 'PROMO20' })
+    @ValidateIf((o) => !o.generate_count)
     @IsString()
-    code: string;
+    code?: string;
+
+    @ApiPropertyOptional({ description: 'Number of coupons to generate (bulk creation)' })
+    @IsOptional()
+    @IsNumber()
+    @Min(1)
+    generate_count?: number;
+
+    @ApiPropertyOptional({ description: 'Prefix for generated coupon codes' })
+    @IsOptional()
+    @IsString()
+    code_prefix?: string;
 
     @ApiPropertyOptional({ description: 'Description of the coupon' })
     @IsOptional()

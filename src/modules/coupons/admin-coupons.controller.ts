@@ -38,7 +38,7 @@ export class AdminCouponsController {
 
     @Post()
     @Permissions('coupons:create')
-    @ApiOperation({ summary: 'Create a new coupon' })
+    @ApiOperation({ summary: 'Create a new coupon or bulk generate' })
     @ApiBody({ type: CreateCouponDto })
     async create(
         @Body(ValidationPipe) dto: CreateCouponDto,
@@ -46,79 +46,79 @@ export class AdminCouponsController {
     ) {
         if (user.type !== 'user') throw new ForbiddenException();
         const data = await this.service.create(dto);
+        const isBulk = data.is_bulk;
         return handleSuccessOne({
             data,
-            message: 'Coupon created successfully',
+            message: isBulk ? `Successfully generated ${data.total_coupons} coupons` : 'Coupon created successfully',
             statusCode: 201,
         });
     }
 
     @Get()
     @Permissions('coupons:read')
-    @ApiOperation({ summary: 'List all coupons' })
-    async findAll(
+    @ApiOperation({ summary: 'List all coupon groups' })
+    async findAllGroups(
         @Query(ValidationPipe) filter: CouponFilterDto,
         @AuthUser() user: JwtPayload,
     ) {
         if (user.type !== 'user') throw new ForbiddenException();
-        const result = await this.service.findAll(filter);
+        const result = await this.service.findAllGroups(filter);
         return handleSuccessPaginated({
             data: result.data,
             total: result.total,
             page: result.page,
             limit: result.limit,
             totalPages: result.totalPages,
-            message: 'Coupons retrieved successfully',
+            message: 'Coupon groups retrieved successfully',
         });
     }
 
-    @Get(':id')
+    @Get('group/:id')
     @Permissions('coupons:read')
-    @ApiOperation({ summary: 'Get coupon by ID' })
-    @ApiParam({ name: 'id', description: 'Coupon ID' })
-    async findOne(
+    @ApiOperation({ summary: 'Get coupon group and its coupons by group ID' })
+    async findGroup(
         @Param('id', ParseUUIDPipe) id: string,
         @AuthUser() user: JwtPayload,
     ) {
         if (user.type !== 'user') throw new ForbiddenException();
-        const data = await this.service.findOne(id);
+        const data = await this.service.findGroup(id);
         return handleSuccessOne({
             data,
-            message: 'Coupon retrieved successfully',
+            message: 'Group retrieved successfully',
         });
     }
 
     @Put(':id')
     @Permissions('coupons:update')
-    @ApiOperation({ summary: 'Update coupon' })
-    @ApiParam({ name: 'id', description: 'Coupon ID' })
+    @ApiOperation({ summary: 'Update coupon group' })
+    @ApiParam({ name: 'id', description: 'Coupon Group ID' })
     @ApiBody({ type: UpdateCouponDto })
-    async update(
+    async updateGroup(
         @Param('id', ParseUUIDPipe) id: string,
         @Body(ValidationPipe) dto: UpdateCouponDto,
         @AuthUser() user: JwtPayload,
     ) {
         if (user.type !== 'user') throw new ForbiddenException();
-        const data = await this.service.update(id, dto);
+        const updatedData = await this.service.updateGroup(id, dto);
         return handleSuccessOne({
-            data,
-            message: 'Coupon updated successfully',
+            data: updatedData,
+            message: 'Coupon group updated successfully',
         });
     }
 
     @Delete(':id')
     @Permissions('coupons:delete')
-    @ApiOperation({ summary: 'Delete coupon' })
-    @ApiParam({ name: 'id', description: 'Coupon ID' })
-    async remove(
+    @ApiOperation({ summary: 'Delete coupon group' })
+    @ApiParam({ name: 'id', description: 'Coupon Group ID' })
+    async removeGroup(
         @Param('id', ParseUUIDPipe) id: string,
         @AuthUser() user: JwtPayload,
     ) {
         if (user.type !== 'user') throw new ForbiddenException();
-        await this.service.remove(id);
+        await this.service.removeGroup(id);
         return handleSuccessOne({
             data: null,
-            message: 'Coupon deleted successfully',
+            message: 'Coupon group deleted successfully',
         });
     }
 }
