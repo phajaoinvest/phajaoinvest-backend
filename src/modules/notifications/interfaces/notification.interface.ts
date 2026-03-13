@@ -51,6 +51,7 @@ export interface NotificationMetadata {
   stockSymbol?: string;
   returnType?: string;
   customerId?: string;
+  durationMonths?: number;
 }
 
 export interface NotificationResponse {

@@ -500,6 +500,31 @@ export function buildCouponRedemptionNotification(
 }
 
 /**
+ * Helper: Coupon Redemption Notification (Admin -> Customer)
+ */
+export function buildCouponRedemptionCustomerNotification(
+  customer: CustomerInfo,
+  code: string,
+  durationMonths: number,
+): NotificationPayload {
+  return {
+    category: NotificationCategory.SYSTEM,
+    action: NotificationAction.CREATED,
+    recipientType: NotificationRecipientType.CUSTOMER,
+    recipientId: customer.customerId,
+    title: 'Subscription Activated',
+    message: `You have successfully redeemed coupon code: ${code}. ${durationMonths} months of Premium Membership granted.`,
+    metadata: {
+      entityId: code,
+      entityType: 'coupon',
+      status: 'active',
+      durationMonths,
+    },
+    createdBy: customer.customerId,
+  };
+}
+
+/**
  * Helper: Payment Slip Submission Notification (Customer -> Admin)
  */
 export function buildPaymentSlipSubmissionNotification(

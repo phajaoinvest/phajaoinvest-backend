@@ -65,6 +65,8 @@ import {
   buildGuaranteedReturnsApplicationNotification,
   buildGuaranteedReturnsApprovalNotification,
   buildTopUpNotification,
+  buildCouponRedemptionNotification,
+  buildCouponRedemptionCustomerNotification,
 } from '../notifications/utils/notification-builders';
 
 type ApplyServiceResult = Awaited<ReturnType<CustomersService['applyService']>>;
@@ -649,6 +651,38 @@ export class CustomerServicesController {
     }
 
     const result = await this.customersService.redeemPremiumMembershipCoupon(user.sub, code);
+
+    // Send notification to both customer and admin
+    try {
+      if (result.status === 'success') {
+        const durationMonths = result.durationMonths || 0;
+
+        // 1. Notify Admin
+        this.notificationsService.createNotification(
+          buildCouponRedemptionNotification(
+            {
+              customerId: user.sub,
+              customerName: user.username,
+            },
+            code,
+            durationMonths,
+          ),
+        );
+
+        // 2. Notify Customer
+        this.notificationsService.createNotification(
+          buildCouponRedemptionCustomerNotification(
+            {
+              customerId: user.sub,
+              customerName: user.username,
+            },
+            code,
+            durationMonths,
+          ),
+        );
+      }
+    } catch (error) {
+    }
 
     return handleSuccessOne({
       data: result,

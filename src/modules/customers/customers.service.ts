@@ -2883,25 +2883,11 @@ export class CustomersService {
         paymentRecord.id,
       );
 
-      // Notify admins about coupon redemption
-      this.repo.findOne({ where: { id: customerId } }).then((customer) => {
-        if (customer) {
-          void this.notificationsService.createNotification(
-            buildCouponRedemptionNotification(
-              {
-                customerId: customer.id,
-                customerName: customer.username,
-                customerEmail: customer.email,
-              },
-              code,
-              durationMonths,
-            ),
-          );
-        }
-      });
+      // Notifications are handled in the controller.
 
       return {
         status: 'success',
+        durationMonths,
         message: `Coupon redeemed successfully. ${durationMonths} months of Premium Membership granted.`,
         service: targetService,
         subscription_expires_at: subscriptionExpiresAt,
