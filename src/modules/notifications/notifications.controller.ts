@@ -69,7 +69,7 @@ export class AdminNotificationsController {
   @Get('unread')
   @ApiOperation({ summary: 'Get admin unread notifications' })
   @ApiResponse({ status: 200, description: 'Unread notifications retrieved' })
-  async getUnreadNotifications() {
+  async getUnreadNotifications(@AuthUser() user: JwtPayload) {
     const recipientId = 'admin'; // Always admin for this controller
     const notifications =
       await this.notificationsService.getUnreadNotifications(recipientId);
@@ -83,7 +83,7 @@ export class AdminNotificationsController {
   @Get('count')
   @ApiOperation({ summary: 'Get admin notification count' })
   @ApiResponse({ status: 200, description: 'Notification count retrieved' })
-  async getNotificationCount() {
+  async getNotificationCount(@AuthUser() user: JwtPayload) {
     const recipientId = 'admin'; // Always admin for this controller
     const count =
       await this.notificationsService.getNotificationCount(recipientId);
@@ -98,7 +98,10 @@ export class AdminNotificationsController {
   @ApiOperation({ summary: 'Mark admin notification as read' })
   @ApiParam({ name: 'id', description: 'Notification ID' })
   @ApiResponse({ status: 200, description: 'Notification marked as read' })
-  async markAsRead(@Param('id', ParseUUIDPipe) id: string) {
+  async markAsRead(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
     const recipientId = 'admin'; // Always admin for this controller
     const success = await this.notificationsService.markAsRead(recipientId, id);
 
@@ -113,7 +116,7 @@ export class AdminNotificationsController {
   @Post('read-all')
   @ApiOperation({ summary: 'Mark all admin notifications as read' })
   @ApiResponse({ status: 200, description: 'All notifications marked as read' })
-  async markAllAsRead() {
+  async markAllAsRead(@AuthUser() user: JwtPayload) {
     const recipientId = 'admin'; // Always admin for this controller
     const count = await this.notificationsService.markAllAsRead(recipientId);
 

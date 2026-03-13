@@ -35,15 +35,12 @@ import {
   handleSuccessOne,
   handleSuccessPaginated,
 } from '../../../common/utils/response.util';
-import { NotificationsService } from '../../notifications/notifications.service';
-import { buildStockPickPaymentNotification } from '../../notifications/utils/notification-builders';
 
 @ApiTags('Customer Stock Picks')
 @Controller('stock-picks')
 export class CustomerStockPicksController {
   constructor(
     private readonly stockPicksService: StockPicksService,
-    private readonly notificationsService: NotificationsService,
   ) {}
 
   @Get()
@@ -293,14 +290,6 @@ export class CustomerStockPicksController {
       user.sub,
       id,
       paymentSlipDto,
-    );
-
-    // Send notification to admin for stock pick payment slip submission
-    await this.notificationsService.createNotification(
-      buildStockPickPaymentNotification(
-        { customerId: user.sub, customerName: user.username },
-        result.id,
-      ),
     );
 
     return handleSuccessOne({

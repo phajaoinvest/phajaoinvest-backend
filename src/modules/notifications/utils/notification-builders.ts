@@ -208,7 +208,9 @@ export function buildGuaranteedReturnsApprovalNotification(
  */
 export function buildStockPickPaymentNotification(
   customer: CustomerInfo,
-  selectionId: string,
+  customerPickId: string,
+  stockSymbol: string,
+  amount: number,
 ): NotificationPayload {
   return {
     category: NotificationCategory.STOCK_PICK_PAYMENT,
@@ -216,12 +218,14 @@ export function buildStockPickPaymentNotification(
     recipientType: NotificationRecipientType.ADMIN,
     recipientId: 'admin',
     title: 'Stock Pick Payment Slip Submitted',
-    message: `${customer.customerName || 'Customer'} submitted payment slip for stock pick`,
+    message: `${customer.customerName || 'Customer'} submitted payment slip for ${stockSymbol}`,
     metadata: {
-      entityId: selectionId,
-      entityType: 'stock-pick',
+      entityId: customerPickId,
+      entityType: 'customer-stock-pick',
+      stockSymbol,
       customerName: customer.customerName,
       customerEmail: customer.customerEmail,
+      amount,
       status: 'pending',
     },
     createdBy: customer.customerId,
@@ -234,7 +238,8 @@ export function buildStockPickPaymentNotification(
 export function buildStockPickApprovalNotification(
   customer: CustomerInfo,
   admin: AdminInfo,
-  selectionId: string,
+  customerPickId: string,
+  stockSymbol: string,
   approved: boolean,
   reason?: string,
 ): NotificationPayload {
@@ -247,11 +252,12 @@ export function buildStockPickApprovalNotification(
     recipientId: customer.customerId,
     title: approved ? 'Stock Pick Approved' : 'Stock Pick Rejected',
     message: approved
-      ? 'Your stock pick has been approved'
-      : `Your stock pick was rejected${reason ? `: ${reason}` : ''}`,
+      ? `Your stock pick ${stockSymbol} has been approved`
+      : `Your stock pick ${stockSymbol} was rejected${reason ? `: ${reason}` : ''}`,
     metadata: {
-      entityId: selectionId,
-      entityType: 'stock-pick',
+      entityId: customerPickId,
+      entityType: 'customer-stock-pick',
+      stockSymbol,
       adminName: admin.adminName,
       status: approved ? 'approved' : 'rejected',
       reason,
@@ -434,6 +440,146 @@ export function buildInvestmentReturnApprovalNotification(
     metadata: {
       entityId: returnId,
       entityType: 'investment-return',
+      adminName: admin.adminName,
+      amount,
+      status: approved ? 'approved' : 'rejected',
+      reason,
+    },
+  };
+}
+
+/**
+ * Helper: New Customer Registration Notification (Customer -> Admin)
+ */
+export function buildCustomerRegistrationNotification(
+  customer: CustomerInfo,
+): NotificationPayload {
+  return {
+    category: NotificationCategory.SYSTEM,
+    action: NotificationAction.CREATED,
+    recipientType: NotificationRecipientType.ADMIN,
+    recipientId: 'admin',
+    title: 'New Customer Registered',
+    message: `A new customer ${customer.customerName || customer.customerEmail} has registered`,
+    metadata: {
+      entityId: customer.customerId,
+      entityType: 'customer',
+      customerName: customer.customerName,
+      customerEmail: customer.customerEmail,
+      status: 'active',
+    },
+    createdBy: customer.customerId,
+  };
+}
+
+/**
+ * Helper: Coupon Redemption Notification (Customer -> Admin)
+ */
+export function buildCouponRedemptionNotification(
+  customer: CustomerInfo,
+  code: string,
+  durationMonths: number,
+): NotificationPayload {
+  return {
+    category: NotificationCategory.SYSTEM,
+    action: NotificationAction.CREATED,
+    recipientType: NotificationRecipientType.ADMIN,
+    recipientId: 'admin',
+    title: 'Coupon Redeemed',
+    message: `${customer.customerName || 'Customer'} redeemed a coupon code: ${code}`,
+    metadata: {
+      entityId: code,
+      entityType: 'coupon',
+      customerName: customer.customerName,
+      customerEmail: customer.customerEmail,
+      status: 'active',
+      reason: `Granted ${durationMonths} months of Premium Membership`,
+    },
+    createdBy: customer.customerId,
+  };
+}
+
+/**
+ * Helper: Payment Slip Submission Notification (Customer -> Admin)
+ */
+export function buildPaymentSlipSubmissionNotification(
+  customer: CustomerInfo,
+  paymentId: string,
+  amount: number,
+  serviceType: string,
+): NotificationPayload {
+  return {
+    category: NotificationCategory.SYSTEM,
+    action: NotificationAction.SUBMITTED,
+    recipientType: NotificationRecipientType.ADMIN,
+    recipientId: 'admin',
+    title: 'Payment Slip Submitted',
+    message: `${customer.customerName || 'Customer'} submitted a payment slip for ${serviceType}`,
+    metadata: {
+      entityId: paymentId,
+      entityType: 'payment',
+      customerName: customer.customerName,
+      customerEmail: customer.customerEmail,
+      amount,
+      serviceType,
+      status: 'pending',
+    },
+    createdBy: customer.customerId,
+  };
+}
+
+/**
+ * Helper: Return Request Notification (Customer -> Admin)
+ */
+export function buildReturnRequestNotification(
+  customer: CustomerInfo,
+  transactionId: string,
+  amount: number,
+  type: string,
+): NotificationPayload {
+  return {
+    category: NotificationCategory.SYSTEM,
+    action: NotificationAction.SUBMITTED,
+    recipientType: NotificationRecipientType.ADMIN,
+    recipientId: 'admin',
+    title: 'New Return Request',
+    message: `${customer.customerName || 'Customer'} requested a return of ${type}`,
+    metadata: {
+      entityId: transactionId,
+      entityType: 'investment_transaction',
+      customerName: customer.customerName,
+      customerEmail: customer.customerEmail,
+      amount,
+      returnType: type,
+      status: 'pending',
+    },
+    createdBy: customer.customerId,
+  };
+}
+
+/**
+ * Helper: Return Approval Notification (Admin -> Customer)
+ */
+export function buildReturnApprovalNotification(
+  customer: CustomerInfo,
+  admin: AdminInfo,
+  transactionId: string,
+  amount: number,
+  approved: boolean,
+  reason?: string,
+): NotificationPayload {
+  return {
+    category: NotificationCategory.SYSTEM,
+    action: approved ? NotificationAction.APPROVED : NotificationAction.REJECTED,
+    recipientType: NotificationRecipientType.CUSTOMER,
+    recipientId: customer.customerId,
+    title: approved ? 'Return Request Approved' : 'Return Request Rejected',
+    message: approved
+      ? `Your return request for $${amount} has been approved.`
+      : `Your return request for $${amount} has been rejected. Reason: ${reason || 'Not specified'}`,
+    metadata: {
+      entityId: transactionId,
+      entityType: 'investment_transaction',
       adminName: admin.adminName,
       amount,
       status: approved ? 'approved' : 'rejected',

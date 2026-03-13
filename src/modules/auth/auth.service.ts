@@ -51,6 +51,8 @@ import { CustomersService } from '../customers/customers.service';
 import { CustomerServiceType } from '../customers/entities/customer-service.entity';
 import { parseDeviceContext } from '../../common/utils/device.util';
 import { lookupGeoLocation } from '../../common/utils/geoip.util';
+import { NotificationsService } from '../notifications/notifications.service';
+import { buildCustomerRegistrationNotification } from '../notifications/utils/notification-builders';
 
 // 2FA Rate limiting - prevent brute force attacks
 interface TwoFactorAttempt {
@@ -78,6 +80,7 @@ export class AuthService {
     private readonly walletsService: WalletsService,
     private readonly sessionsService: SessionsService,
     private readonly customersService: CustomersService,
+    private readonly notificationsService: NotificationsService,
   ) { }
 
   /**
@@ -530,7 +533,7 @@ export class AuthService {
       console.error('Failed to auto-apply premium_stock_picks service:', error);
     }
 
-    return {
+    const result = {
       id: saved.id,
       username: saved.username,
       email: saved.email,
@@ -538,6 +541,17 @@ export class AuthService {
       last_name: saved.last_name,
       wallet_id: wallet.id,
     };
+
+    // Notify admins about new registration
+    void this.notificationsService.createNotification(
+      buildCustomerRegistrationNotification({
+        customerId: saved.id,
+        customerName: saved.username,
+        customerEmail: saved.email,
+      }),
+    );
+
+    return result;
   }
 
   // --- Password Strength Helper ---

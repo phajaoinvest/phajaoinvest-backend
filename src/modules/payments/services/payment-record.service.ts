@@ -38,7 +38,7 @@ export class PaymentRecordService {
     @InjectRepository(CustomerService)
     private readonly serviceRepo: Repository<CustomerService>,
     private readonly paymentAuditService: PaymentAuditService,
-  ) {}
+  ) { }
 
   async createPayment(
     createPaymentDto: CreatePaymentDto,

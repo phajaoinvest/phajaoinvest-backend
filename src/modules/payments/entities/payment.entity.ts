@@ -19,6 +19,7 @@ export enum PaymentMethod {
   STRIPE = 'stripe',
   CRYPTO = 'crypto',
   MANUAL_TRANSFER = 'manual_transfer',
+  RECOUPON = 'recoupon',
   OTHER = 'other',
 }
 

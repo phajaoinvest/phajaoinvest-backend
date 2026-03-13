@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MailModule } from '../mail/mail.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationsService } from './notifications.service';
 import { NotificationsGateway } from './notifications.gateway';
@@ -12,9 +13,11 @@ import { TransferHistory } from '../transfer-history/entities/transfer-history.e
 import { InvestmentRequest } from '../investment-info/entities/investment-request.entity';
 import { User } from '../users/entities/user.entity';
 import { UserSettings } from '../settings/entities/user-settings.entity';
+import { Customer } from '../customers/entities/customer.entity';
 
 @Module({
   imports: [
+    MailModule,
     TypeOrmModule.forFeature([
       Notification,
       CustomerService,
@@ -23,6 +26,7 @@ import { UserSettings } from '../settings/entities/user-settings.entity';
       InvestmentRequest,
       User,
       UserSettings,
+      Customer,
     ]),
   ],
   providers: [NotificationsService, NotificationsGateway],

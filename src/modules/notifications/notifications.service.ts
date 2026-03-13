@@ -13,21 +13,13 @@ import {
   shouldSendNotification,
   getSettingKeyForCategory,
 } from './utils/notification-settings-mapper';
+import { MailService } from '../mail/mail.service';
+import { Customer } from '../customers/entities/customer.entity';
 
-/**
- * Interface for the gateway to avoid circular dependency
- */
 interface INotificationsGateway {
   emitNotification(notification: NotificationResponse): void;
 }
 
-/**
- * NotificationsService - Database-backed notification management with real-time Socket.IO support
- *
- * This service provides a persistent notification system using PostgreSQL database.
- * All notifications are stored in the 'notifications' table.
- * Real-time notifications are automatically emitted via Socket.IO when created.
- */
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -40,43 +32,20 @@ export class NotificationsService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserSettings)
     private readonly userSettingsRepository: Repository<UserSettings>,
-  ) {}
+    @InjectRepository(Customer)
+    private readonly customerRepository: Repository<Customer>,
+    private readonly mailService: MailService,
+  ) { }
 
-  /**
-   * Set the gateway instance (called by NotificationsGateway during initialization)
-   * This avoids circular dependency issues
-   */
   setGateway(gateway: INotificationsGateway): void {
     this.gateway = gateway;
     this.logger.log('✅ Gateway instance registered with NotificationsService');
   }
-
-  /**
-   * MAIN REUSABLE FUNCTION - Creates, stores, and emits a notification via Socket.IO
-   *
-   * This is the central function that all routes will call to create notifications.
-   * It automatically handles:
-   * 1. Admin notification preference filtering
-   * 2. Database persistence (for each admin who has the setting enabled)
-   * 3. Real-time Socket.IO emission
-   * 4. Error handling (wrapped in try-catch)
-   *
-   * @param payload - The notification payload
-   * @returns The created notification or null if failed
-   */
   async createNotification(
     payload: NotificationPayload,
   ): Promise<NotificationResponse | null> {
     try {
-      // Check if this is an admin notification that needs preference filtering
-      if (
-        payload.recipientType === NotificationRecipientType.ADMIN &&
-        payload.recipientId === 'admin'
-      ) {
-        return this.createAdminNotificationWithPreferences(payload);
-      }
-
-      // For customer notifications, proceed as normal (single recipient)
+      // For all notifications (including admin), proceed as a single record
       return this.createSingleNotification(payload);
     } catch (error) {
       const errorMessage =
@@ -90,9 +59,6 @@ export class NotificationsService {
     }
   }
 
-  /**
-   * Creates notifications for all admin users based on their individual preferences
-   */
   private async createAdminNotificationWithPreferences(
     payload: NotificationPayload,
   ): Promise<NotificationResponse | null> {
@@ -147,7 +113,8 @@ export class NotificationsService {
         recipientId: admin.id, // Use individual admin ID instead of 'admin'
       };
 
-      const response = await this.createSingleNotification(adminPayload);
+      // Skip email here because we'll send a single global admin notification email after the loop
+      const response = await this.createSingleNotification(adminPayload, true);
       if (response) {
         sentCount++;
         if (!firstResponse) {
@@ -156,6 +123,9 @@ export class NotificationsService {
       }
     }
 
+    // Send a single notification email to the configured admin emails
+    void this.triggerEmailNotification(payload);
+
     this.logger.log(
       `✅ Admin notification sent to ${sentCount}/${adminUsers.length} admins based on preferences`,
     );
@@ -163,17 +133,31 @@ export class NotificationsService {
     return firstResponse;
   }
 
-  /**
-   * Creates a single notification for a specific recipient
-   */
   private async createSingleNotification(
     payload: NotificationPayload,
+    skipEmail = false,
   ): Promise<NotificationResponse | null> {
+    // PERFORMANCE: Extract indexed fields from metadata for fast querying
+    const entityId = payload.metadata?.entityId;
+    const entityType = payload.metadata?.entityType;
+
+    // Determine if we can link this to a real customer UUID
+    let customerId: string | null = null;
+    if (payload.recipientType === NotificationRecipientType.CUSTOMER) {
+      customerId = payload.recipientId;
+    } else if (payload.metadata?.customerId) {
+      // Sometimes we notify admins about a specific customer
+      customerId = payload.metadata.customerId;
+    }
+
     const notification = this.notificationRepository.create({
       category: payload.category,
       action: payload.action,
       recipientType: payload.recipientType,
       recipientId: payload.recipientId,
+      entityId: entityId as string,
+      entityType: entityType as string,
+      customerId: customerId as string,
       title: payload.title,
       message: payload.message,
       metadata: payload.metadata as unknown as Record<string, unknown>,
@@ -189,6 +173,11 @@ export class NotificationsService {
     this.logger.log(
       `✅ Notification created: ${savedNotification.category}:${savedNotification.action} for ${savedNotification.recipientType}:${savedNotification.recipientId}`,
     );
+
+    // TRIGGER EMAIL NOTIFICATION
+    if (!skipEmail) {
+      void this.triggerEmailNotification(payload);
+    }
 
     // Emit real-time notification via Socket.IO (if gateway is available)
     if (this.gateway) {
@@ -336,6 +325,39 @@ export class NotificationsService {
   }
 
   /**
+   * Handle triggering emails based on notification payload
+   */
+  private async triggerEmailNotification(payload: NotificationPayload): Promise<void> {
+    try {
+      if (payload.recipientType === NotificationRecipientType.ADMIN) {
+        // Send email to all configured admins
+        await this.mailService.sendAdminNotification(
+          payload.title,
+          payload.message,
+          payload.metadata,
+        );
+      } else if (payload.recipientType === NotificationRecipientType.CUSTOMER) {
+        // Fetch customer email
+        const customer = await this.customerRepository.findOne({
+          where: { id: payload.recipientId },
+          select: ['email'],
+        });
+
+        if (customer?.email) {
+          await this.mailService.sendCustomerNotification(
+            customer.email,
+            payload.title,
+            payload.message,
+            payload.metadata,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.error('Failed to trigger email notification', err);
+    }
+  }
+
+  /**
    * Map entity to response
    */
   private mapToResponse(notification: Notification): NotificationResponse {
@@ -349,8 +371,10 @@ export class NotificationsService {
       title: notification.title,
       message: notification.message,
       metadata: {
-        entityId: (metadata.entityId as string) || '',
-        entityType: (metadata.entityType as string) || '',
+        ...metadata,
+        entityId: notification.entityId || (metadata.entityId as string) || '',
+        entityType: notification.entityType || (metadata.entityType as string) || '',
+        customerId: notification.customerId || (metadata.customerId as string) || undefined,
         customerName: metadata.customerName as string | undefined,
         customerEmail: metadata.customerEmail as string | undefined,
         amount: metadata.amount as number | undefined,

@@ -117,4 +117,12 @@ export const NotificationCategoryDescriptions: Record<
     settingKey: 'notify_investments',
     description: 'Investment return requests',
   },
+  [NotificationCategory.KYC]: {
+    settingKey: 'notify_new_customers',
+    description: 'Customer KYC verification',
+  },
+  [NotificationCategory.SYSTEM]: {
+    settingKey: 'notify_system_alerts',
+    description: 'System alerts and maintenance',
+  },
 };

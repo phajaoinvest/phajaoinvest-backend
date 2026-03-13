@@ -57,7 +57,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly twoFactorService: TwoFactorService,
-  ) {}
+  ) { }
 
   @Post('customer/register')
   @ApiOperation({ summary: 'Register new customer account' })
@@ -171,6 +171,7 @@ export class AuthController {
       connection?: { remoteAddress?: string };
     },
   ): Promise<IOneResponse<LoginResponseDto>> {
+    console.log({ loginDto })
     const headers = req.headers || {};
     const userAgent = headers['user-agent'] as string | undefined;
     const forwarded = headers['x-forwarded-for'] as string | undefined;

@@ -15,6 +15,7 @@ import { getJwtConfig } from '../../config/jwt.config';
 import { WalletsModule } from '../wallets/wallets.module';
 import { SessionsModule } from '../sessions/sessions.module';
 import { CustomersModule } from '../customers/customers.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CustomersModule } from '../customers/customers.module';
     WalletsModule,
     SessionsModule,
     CustomersModule,
+    NotificationsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, TwoFactorService, JwtStrategy, JwtUserStrategy, JwtCustomerStrategy],

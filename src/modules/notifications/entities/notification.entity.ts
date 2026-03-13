@@ -4,12 +4,15 @@ import {
   Column,
   CreateDateColumn,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
 import {
   NotificationCategory,
   NotificationAction,
   NotificationRecipientType,
 } from '../interfaces/notification.interface';
+import { Customer } from '../../customers/entities/customer.entity';
 
 @Entity('notifications')
 @Index(['recipientId', 'isRead'])
@@ -41,7 +44,25 @@ export class Notification {
 
   @Column({ type: 'varchar', nullable: false })
   @Index()
-  recipientId: string;
+  recipientId: string; // Either "admin" or customer UUID
+
+  // PERFORMANCE: Explicit columns for lightning-fast joins and filtering
+  @Column({ type: 'varchar', nullable: true })
+  @Index()
+  entityType: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  @Index()
+  entityId: string;
+
+  // PERFORMANCE JOIN: Binary UUID column for fast Customer relationship
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  customerId: string;
+
+  @ManyToOne(() => Customer, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'customerId' })
+  customer: Customer;
 
   @Column({ type: 'varchar', nullable: false })
   title: string;

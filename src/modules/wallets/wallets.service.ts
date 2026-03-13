@@ -9,6 +9,12 @@ import { Wallet } from './entities/wallet.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { TransferIdentify, TransferStatus } from '../../common/enums';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildTopUpNotification,
+  buildTopUpApprovalNotification,
+} from '../notifications/utils/notification-builders';
+import { Customer } from '../customers/entities/customer.entity';
 
 interface CreateWalletDto {
   customerId: string;
@@ -41,8 +47,10 @@ export class WalletsService {
     @InjectRepository(Wallet) private readonly repo: Repository<Wallet>,
     @InjectRepository(TransferHistory)
     private readonly transferRepo: Repository<TransferHistory>,
-    // Removed customerServiceRepo & investmentInfoService after moving invest logic to investment-info module
-  ) {}
+    @InjectRepository(Customer)
+    private readonly customerRepo: Repository<Customer>,
+    private readonly notificationsService: NotificationsService,
+  ) { }
 
   async create(dto: CreateWalletDto) {
     const entity = this.repo.create({
@@ -106,7 +114,26 @@ export class WalletsService {
       payment_slip: dto.payment_slip || undefined,
       status: TransferStatus.PENDING,
     });
-    return this.transferRepo.save(transfer);
+    const saved = await this.transferRepo.save(transfer);
+
+    // Notify admins about top-up request
+    this.customerRepo.findOne({ where: { id: dto.customerId } }).then((customer) => {
+      if (customer) {
+        void this.notificationsService.createNotification(
+          buildTopUpNotification(
+            {
+              customerId: customer.id,
+              customerName: customer.username,
+              customerEmail: customer.email,
+            },
+            saved.id,
+            dto.amount,
+          ),
+        );
+      }
+    });
+
+    return saved;
   }
 
   async approveTopup(dto: ApproveTopupDto) {
@@ -129,7 +156,31 @@ export class WalletsService {
     transfer.status = TransferStatus.APPROVED;
     transfer.approved_by = dto.adminId;
     await this.repo.save(wallet);
-    await this.transferRepo.save(transfer);
+    const savedTransfer = await this.transferRepo.save(transfer);
+
+    // Fetch full transfer with customer to notify
+    const fullTransfer = await this.transferRepo.findOne({
+      where: { id: savedTransfer.id },
+      relations: ['customer'],
+    });
+
+    if (fullTransfer?.customer) {
+      void this.notificationsService.createNotification(
+        buildTopUpApprovalNotification(
+          {
+            customerId: fullTransfer.customer.id,
+            customerName: fullTransfer.customer.username,
+            customerEmail: fullTransfer.customer.email,
+          },
+          {
+            adminId: dto.adminId,
+          },
+          fullTransfer.id,
+          fullTransfer.amount,
+          true,
+        ),
+      );
+    }
     return {
       wallet_id: wallet.id,
       new_balance: wallet.total_cash,
@@ -147,8 +198,34 @@ export class WalletsService {
     }
     transfer.status = TransferStatus.REJECTED;
     transfer.rejected_by = dto.adminId;
-    // Potentially store reason in future (needs column)
-    return this.transferRepo.save(transfer);
+    const savedTransfer = await this.transferRepo.save(transfer);
+
+    // Fetch full transfer with customer to notify
+    const fullTransfer = await this.transferRepo.findOne({
+      where: { id: savedTransfer.id },
+      relations: ['customer'],
+    });
+
+    if (fullTransfer?.customer) {
+      void this.notificationsService.createNotification(
+        buildTopUpApprovalNotification(
+          {
+            customerId: fullTransfer.customer.id,
+            customerName: fullTransfer.customer.username,
+            customerEmail: fullTransfer.customer.email,
+          },
+          {
+            adminId: dto.adminId,
+          },
+          fullTransfer.id,
+          fullTransfer.amount,
+          false,
+          dto.reason,
+        ),
+      );
+    }
+
+    return savedTransfer;
   }
 
   // --- Admin: List pending topups ---

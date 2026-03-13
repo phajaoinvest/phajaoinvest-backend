@@ -28,6 +28,13 @@ import { CustomerService } from '../customers/entities/customer-service.entity';
 import { CustomerServiceType } from '../customers/entities/customer-service.entity';
 import { DatabaseInterestRateService } from './database-interest-rate.service';
 import { RiskTolerance } from './entities/interest-rate-configuration.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildInvestmentRequestNotification,
+  buildInvestmentApprovalNotification,
+  buildReturnRequestNotification,
+  buildReturnApprovalNotification,
+} from '../notifications/utils/notification-builders';
 
 // Updated DTOs to include form fields
 interface CreateInvestmentRequestDto {
@@ -64,7 +71,8 @@ export class InvestmentService {
     private readonly serviceRepo: Repository<CustomerService>,
     private readonly dataSource: DataSource,
     private readonly databaseInterestRateService: DatabaseInterestRateService,
-  ) {}
+    private readonly notificationsService: NotificationsService,
+  ) { }
 
   // === FLOW 1: Customer submits investment request with payment slip ===
   async createInvestmentRequest(dto: CreateInvestmentRequestDto) {
@@ -131,6 +139,23 @@ export class InvestmentService {
       });
 
       const saved = await requestRepo.save(request);
+
+      // Notify admins about investment request
+      manager.getRepository('Customer').findOne({ where: { id: dto.customer_id } }).then((customer: any) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildInvestmentRequestNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              saved.id,
+              dto.amount,
+            ),
+          );
+        }
+      });
 
       // Update customer summary within transaction
       await this.updateCustomerSummaryInTransaction(
@@ -241,6 +266,27 @@ export class InvestmentService {
       });
       await transactionRepo.save(transaction);
 
+      // Notify customer about approval
+      manager.getRepository('Customer').findOne({ where: { id: request.customer_id } }).then((customer: any) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildInvestmentApprovalNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              {
+                adminId: adminId,
+              },
+              request.id,
+              Number(request.amount),
+              true,
+            ),
+          );
+        }
+      });
+
       // Update customer summary within transaction
       await this.updateCustomerSummaryInTransaction(
         manager,
@@ -291,6 +337,28 @@ export class InvestmentService {
       request.reviewed_at = new Date();
       request.admin_notes = rejectionData.admin_notes || null;
       await requestRepo.save(request);
+
+      // Notify customer about rejection
+      manager.getRepository('Customer').findOne({ where: { id: request.customer_id } }).then((customer: any) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildInvestmentApprovalNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              {
+                adminId: adminId,
+              },
+              request.id,
+              Number(request.amount),
+              false,
+              rejectionData.admin_notes || undefined,
+            ),
+          );
+        }
+      });
 
       return {
         request_id: request.id,
@@ -354,6 +422,24 @@ export class InvestmentService {
 
       const transaction = transactionRepo.create(transactionData);
       const saved = await transactionRepo.save(transaction);
+
+      // Notify admins about return request
+      manager.getRepository('Customer').findOne({ where: { id: dto.customer_id } }).then((customer: any) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildReturnRequestNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              saved.id,
+              dto.requested_amount,
+              dto.request_type,
+            ),
+          );
+        }
+      });
 
       return {
         transaction_id: saved.id,
@@ -448,6 +534,27 @@ export class InvestmentService {
       });
       await transactionRepo.save(approvalTransaction);
 
+      // Notify customer about approval
+      manager.getRepository('Customer').findOne({ where: { id: transaction.customer_id } }).then((customer: any) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildReturnApprovalNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              {
+                adminId: adminId,
+              },
+              transaction.id,
+              approvedAmount,
+              true,
+            ),
+          );
+        }
+      });
+
       // Update customer summary within transaction
       const summaryRepo = manager.getRepository(CustomerInvestmentSummary);
       const summary = await summaryRepo.findOne({
@@ -511,6 +618,28 @@ export class InvestmentService {
         ? `Return rejected: ${rejectionData.reason}`
         : 'Return request rejected by admin';
       await transactionRepo.save(transaction);
+
+      // Notify customer about rejection
+      manager.getRepository('Customer').findOne({ where: { id: transaction.customer_id } }).then((customer: any) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildReturnApprovalNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              {
+                adminId: adminId,
+              },
+              transaction.id,
+              Number(transaction.amount),
+              false,
+              rejectionData.reason,
+            ),
+          );
+        }
+      });
 
       return {
         transaction_id: transaction.id,

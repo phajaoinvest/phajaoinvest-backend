@@ -950,7 +950,7 @@ export class CustomerServicesController {
         return `${label}${months ? ' - ' + months : ''}`;
       })();
       const currency = pkg?.currency || 'USD';
-      const rawPrice = pkg?.price as unknown;
+      const rawPrice = p.amount || pkg?.price as unknown;
       const priceNum = Number(
         typeof rawPrice === 'string' || typeof rawPrice === 'number'
           ? rawPrice
@@ -1123,9 +1123,10 @@ export class CustomerServicesController {
       throw new ForbiddenException('Only admins can reject payment slips');
     }
 
-    const result = await this.customersService.approveServicePayment(
+    const result = await this.customersService.rejectServicePayment(
       paymentId,
       user.sub,
+      body.rejection_reason,
       body.admin_notes,
     );
 

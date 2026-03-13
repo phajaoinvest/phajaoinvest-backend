@@ -58,6 +58,17 @@ import type { EmailService } from './interfaces/email.interface';
 import { SubscriptionDuration } from './entities/customer-service.entity';
 import type { PaymentProvider } from './services/payment.service';
 import { PaymentRecordService } from '../payments/services/payment-record.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildPremiumMembershipApplicationNotification,
+  buildStockAccountApplicationNotification,
+  buildGuaranteedReturnsApplicationNotification,
+  buildPremiumMembershipApprovalNotification,
+  buildStockAccountApprovalNotification,
+  buildGuaranteedReturnsApprovalNotification,
+  buildCouponRedemptionNotification,
+  buildPaymentSlipSubmissionNotification,
+} from '../notifications/utils/notification-builders';
 import {
   PaymentAuditService,
   PaymentAuditContext,
@@ -415,6 +426,7 @@ export class CustomersService {
     private readonly paymentRecordService: PaymentRecordService,
     private readonly paymentAuditService: PaymentAuditService,
     private readonly couponsService: CouponsService,
+    private readonly notificationsService: NotificationsService,
   ) { }
 
   async create(dto: CreateCustomerDto) {
@@ -1509,12 +1521,63 @@ export class CustomersService {
         finalStatus = 'pending_review';
       }
 
-      return {
+      const result = {
         service: savedService,
         kyc: kycRecord,
         status: finalStatus,
         duplicated_from_kyc_id: duplicatedFromKycId || undefined,
       };
+
+      // Notify admins about new service application
+      if (serviceType === CustomerServiceType.PREMIUM_MEMBERSHIP) {
+        this.repo.findOne({ where: { id: customerId } }).then((customer) => {
+          if (customer) {
+            void this.notificationsService.createNotification(
+              buildPremiumMembershipApplicationNotification(
+                {
+                  customerId: customer.id,
+                  customerName: customer.username,
+                  customerEmail: customer.email,
+                },
+                result.service.id,
+                result.service.subscription_fee || 0,
+              ),
+            );
+          }
+        });
+      } else if (serviceType === CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT) {
+        this.repo.findOne({ where: { id: customerId } }).then((customer) => {
+          if (customer) {
+            void this.notificationsService.createNotification(
+              buildStockAccountApplicationNotification(
+                {
+                  customerId: customer.id,
+                  customerName: customer.username,
+                  customerEmail: customer.email,
+                },
+                result.service.id,
+              ),
+            );
+          }
+        });
+      } else if (serviceType === CustomerServiceType.GUARANTEED_RETURNS) {
+        this.repo.findOne({ where: { id: customerId } }).then((customer) => {
+          if (customer) {
+            void this.notificationsService.createNotification(
+              buildGuaranteedReturnsApplicationNotification(
+                {
+                  customerId: customer.id,
+                  customerName: customer.username,
+                  customerEmail: customer.email,
+                },
+                result.service.id,
+              ),
+            );
+          }
+        });
+      }
+
+      return result;
     });
   }
 
@@ -1530,6 +1593,7 @@ export class CustomersService {
 
       const service = await svcRepo.findOne({
         where: { id: serviceId },
+        relations: ['customer'],
       });
       if (!service) {
         throw new NotFoundException('Service application not found');
@@ -1608,11 +1672,34 @@ export class CustomersService {
           context,
         );
 
-        return {
+        const result = {
           service: savedService,
           status: 'activated',
           payment: successfulPayment,
         };
+
+        // Notify customer about approval
+        if (service.customer) {
+          const builder = this.getApprovalNotificationBuilder(service.service_type);
+          if (builder) {
+            void this.notificationsService.createNotification(
+              builder(
+                {
+                  customerId: service.customer.id,
+                  customerName: service.customer.username,
+                  customerEmail: service.customer.email,
+                },
+                {
+                  adminId: reviewerUserId,
+                },
+                service.id,
+                true,
+              ),
+            );
+          }
+        }
+
+        return result;
       }
 
       // Handle services that require KYC approval (original logic)
@@ -1709,12 +1796,36 @@ export class CustomersService {
               },
             );
 
-            return {
+            const result = {
               service: savedService,
               status: 'rejected',
               payment: successfulPayment,
               reason: rejectionReason,
             };
+
+            // Notify customer about rejection
+            if (service.customer) {
+              const builder = this.getApprovalNotificationBuilder(service.service_type);
+              if (builder) {
+                void this.notificationsService.createNotification(
+                  builder(
+                    {
+                      customerId: service.customer.id,
+                      customerName: service.customer.username,
+                      customerEmail: service.customer.email,
+                    },
+                    {
+                      adminId: reviewerUserId,
+                    },
+                    service.id,
+                    false,
+                    rejectionReason,
+                  ),
+                );
+              }
+            }
+
+            return result;
           }
         }
 
@@ -2710,6 +2821,7 @@ export class CustomersService {
           subscription_duration: durationMonths as any,
           subscription_fee: 0,
           subscription_expires_at: subscriptionExpiresAt,
+          subscription_package_id: coupon.subscription_package_id,
         });
         targetService = await serviceRepo.save(targetService);
       } else {
@@ -2731,6 +2843,7 @@ export class CustomersService {
           subscription_duration: durationMonths as any,
           subscription_fee: 0,
           subscription_expires_at: subscriptionExpiresAt,
+          subscription_package_id: coupon.subscription_package_id,
         });
 
         targetService = {
@@ -2739,6 +2852,7 @@ export class CustomersService {
           status: SubscriptionStatus.ACTIVE,
           subscription_duration: durationMonths,
           subscription_expires_at: subscriptionExpiresAt,
+          subscription_package_id: coupon.subscription_package_id,
         } as any;
       }
 
@@ -2748,7 +2862,7 @@ export class CustomersService {
         customer_id: customerId,
         service_id: targetService.id,
         payment_type: PaymentType.SUBSCRIPTION,
-        payment_method: PaymentMethod.MANUAL_TRANSFER, // Use manual or add RECOUPON
+        payment_method: PaymentMethod.RECOUPON,
         amount: 0,
         currency: 'USD',
         status: PaymentStatus.SUCCEEDED,
@@ -2757,6 +2871,9 @@ export class CustomersService {
         external_payment_id: paymentId,
         paid_at: now,
         approved_at: now,
+        admin_notes: `Redeemed via coupon code: ${code}`,
+        subscription_package_id: coupon.subscription_package_id,
+        subscription_expires_at: subscriptionExpiresAt,
       });
 
       await this.couponsService.recordUsage(
@@ -2766,11 +2883,29 @@ export class CustomersService {
         paymentRecord.id,
       );
 
+      // Notify admins about coupon redemption
+      this.repo.findOne({ where: { id: customerId } }).then((customer) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildCouponRedemptionNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              code,
+              durationMonths,
+            ),
+          );
+        }
+      });
+
       return {
         status: 'success',
         message: `Coupon redeemed successfully. ${durationMonths} months of Premium Membership granted.`,
         service: targetService,
         subscription_expires_at: subscriptionExpiresAt,
+        payment: paymentRecord,
       };
     });
   }
@@ -2817,8 +2952,23 @@ export class CustomersService {
         // Get updated payment record
         const updatedPayment = await paymentRepo.findOne({
           where: { id: paymentId },
-          relations: ['service'],
+          relations: ['service', 'customer'],
         });
+
+        if (updatedPayment?.customer) {
+          void this.notificationsService.createNotification(
+            buildPaymentSlipSubmissionNotification(
+              {
+                customerId: updatedPayment.customer.id,
+                customerName: updatedPayment.customer.username,
+                customerEmail: updatedPayment.customer.email,
+              },
+              updatedPayment.id,
+              updatedPayment.amount,
+              updatedPayment.service?.service_type || 'service',
+            ),
+          );
+        }
 
         return {
           status: 'payment_slip_submitted',
@@ -2850,7 +3000,7 @@ export class CustomersService {
             id: paymentId,
             status: In(approvableStatuses),
           },
-          relations: ['service'],
+          relations: ['service', 'customer'],
         });
 
         if (!payment) {
@@ -2893,11 +3043,86 @@ export class CustomersService {
           status: SubscriptionStatus.ACTIVE,
         });
 
+        // Notify customer about approval
+        if (payment.customer) {
+          const builder = this.getApprovalNotificationBuilder(service.service_type);
+          if (builder) {
+            void this.notificationsService.createNotification(
+              builder(
+                {
+                  customerId: payment.customer.id,
+                  customerName: payment.customer.username,
+                  customerEmail: payment.customer.email,
+                },
+                {
+                  adminId: adminUserId,
+                },
+                payment.id,
+                true,
+              ),
+            );
+          }
+        }
+
         return {
           status: 'approved',
           message: 'Payment approved and service activated successfully',
           service_id: service.id,
           subscription_expires_at: subscriptionExpiresAt,
+        };
+      },
+    );
+  }
+
+  async rejectServicePayment(
+    paymentId: string,
+    adminUserId: string,
+    rejectionReason: string,
+    adminNotes?: string,
+  ) {
+    return await this.dataSource.transaction(
+      async (transactionalEntityManager) => {
+        const paymentRepo = transactionalEntityManager.getRepository(Payment);
+
+        const payment = await paymentRepo.findOne({
+          where: { id: paymentId },
+          relations: ['service', 'customer'],
+        });
+
+        if (!payment) {
+          throw new NotFoundException('Payment record not found');
+        }
+
+        await paymentRepo.update(payment.id, {
+          status: PaymentStatus.FAILED,
+          admin_notes: `${adminNotes ? adminNotes + '\n' : ''}Rejection Reason: ${rejectionReason}`,
+        });
+
+        // Notify customer about rejection
+        if (payment.customer && payment.service) {
+          const builder = this.getApprovalNotificationBuilder(payment.service.service_type);
+          if (builder) {
+            void this.notificationsService.createNotification(
+              builder(
+                {
+                  customerId: payment.customer.id,
+                  customerName: payment.customer.username,
+                  customerEmail: payment.customer.email,
+                },
+                {
+                  adminId: adminUserId,
+                },
+                payment.id,
+                false,
+                rejectionReason,
+              ),
+            );
+          }
+        }
+
+        return {
+          status: 'rejected',
+          message: 'Payment rejected and customer notified',
         };
       },
     );
@@ -3000,6 +3225,23 @@ export class CustomersService {
         subscription_package_id: packageId,
       };
       const paymentRecord = await paymentRepo.save(paymentEntity);
+
+      // Notify admins about renewal application
+      this.repo.findOne({ where: { id: customerId } }).then((customer) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildPremiumMembershipApplicationNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              paymentRecord.id,
+              fee,
+            ),
+          );
+        }
+      });
 
       return {
         status: 'renewal_pending_admin_review',
@@ -3912,6 +4154,19 @@ export class CustomersService {
       total_pending: totalPending,
       total_active: totalActive,
     };
+  }
+
+  private getApprovalNotificationBuilder(type: CustomerServiceType) {
+    switch (type) {
+      case CustomerServiceType.PREMIUM_MEMBERSHIP:
+        return buildPremiumMembershipApprovalNotification;
+      case CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT:
+        return buildStockAccountApprovalNotification;
+      case CustomerServiceType.GUARANTEED_RETURNS:
+        return buildGuaranteedReturnsApprovalNotification;
+      default:
+        return null;
+    }
   }
 
   /**

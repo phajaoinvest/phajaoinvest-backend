@@ -28,6 +28,11 @@ import {
   PaginatedResult,
 } from '../../../common/utils/pagination.util';
 import { NodemailerEmailService } from './email.service';
+import { NotificationsService } from '../../notifications/notifications.service';
+import {
+  buildStockPickPaymentNotification,
+  buildStockPickApprovalNotification,
+} from '../../notifications/utils/notification-builders';
 
 export interface StockPickEmailData {
   to: string;
@@ -69,7 +74,8 @@ export class StockPicksService {
     private readonly customerServiceRepo: Repository<CustomerService>,
     private readonly dataSource: DataSource,
     private readonly emailService: NodemailerEmailService,
-  ) {}
+    private readonly notificationsService: NotificationsService,
+  ) { }
 
   // ============== Helper Methods ==============
 
@@ -164,27 +170,27 @@ export class StockPicksService {
       clause: string;
       params: Record<string, unknown>;
     }> = [
-      {
-        condition: !!filterDto.service_type,
-        clause: 'pick.service_type = :serviceType',
-        params: { serviceType: filterDto.service_type },
-      },
-      {
-        condition: !!filterDto.status,
-        clause: 'pick.status = :status',
-        params: { status: filterDto.status },
-      },
-      {
-        condition: !!filterDto.availability,
-        clause: 'pick.availability = :availability',
-        params: { availability: filterDto.availability },
-      },
-      {
-        condition: filterDto.is_active !== undefined,
-        clause: 'pick.is_active = :isActive',
-        params: { isActive: filterDto.is_active },
-      },
-    ];
+        {
+          condition: !!filterDto.service_type,
+          clause: 'pick.service_type = :serviceType',
+          params: { serviceType: filterDto.service_type },
+        },
+        {
+          condition: !!filterDto.status,
+          clause: 'pick.status = :status',
+          params: { status: filterDto.status },
+        },
+        {
+          condition: !!filterDto.availability,
+          clause: 'pick.availability = :availability',
+          params: { availability: filterDto.availability },
+        },
+        {
+          condition: filterDto.is_active !== undefined,
+          clause: 'pick.is_active = :isActive',
+          params: { isActive: filterDto.is_active },
+        },
+      ];
 
     filters
       .filter((f) => f.condition)
@@ -329,9 +335,9 @@ export class StockPicksService {
       qb.getManyAndCount(),
       customerId
         ? this.customerPickRepo.find({
-            where: { customer_id: customerId },
-            select: ['stock_pick_id', 'status'],
-          })
+          where: { customer_id: customerId },
+          select: ['stock_pick_id', 'status'],
+        })
         : Promise.resolve([]),
     ]);
 
@@ -499,7 +505,27 @@ export class StockPicksService {
         relations: ['stock_pick'],
       });
 
-      return this.mapToCustomerPickResponseDto(full!);
+      const result = this.mapToCustomerPickResponseDto(full!);
+
+      // Notify admins about new stock pick submission
+      this.customerRepo.findOne({ where: { id: customerId } }).then((customer) => {
+        if (customer) {
+          void this.notificationsService.createNotification(
+            buildStockPickPaymentNotification(
+              {
+                customerId: customer.id,
+                customerName: customer.username,
+                customerEmail: customer.email,
+              },
+              saved.id,
+              stockPick.stock_symbol,
+              paymentSlipDto.payment_amount,
+            ),
+          );
+        }
+      });
+
+      return result;
     });
   }
 
@@ -610,7 +636,47 @@ export class StockPicksService {
         console.error('Failed to send email:', err),
       );
 
-      return this.mapToCustomerPickResponseDto(updatedPick!);
+      const result = this.mapToCustomerPickResponseDto(updatedPick!);
+
+      // Notify customer about approval/rejection
+      if (updatedPick) {
+        if (newStatus === CustomerPickStatus.APPROVED) {
+          void this.notificationsService.createNotification(
+            buildStockPickApprovalNotification(
+              {
+                customerId: updatedPick.customer_id,
+                customerName: updatedPick.customer.username,
+                customerEmail: updatedPick.customer.email,
+              },
+              {
+                adminId: adminUserId,
+              },
+              updatedPick.id,
+              updatedPick.stock_pick.stock_symbol,
+              true,
+            ),
+          );
+        } else if (newStatus === CustomerPickStatus.REJECTED) {
+          void this.notificationsService.createNotification(
+            buildStockPickApprovalNotification(
+              {
+                customerId: updatedPick.customer_id,
+                customerName: updatedPick.customer.username,
+                customerEmail: updatedPick.customer.email,
+              },
+              {
+                adminId: adminUserId,
+              },
+              updatedPick.id,
+              updatedPick.stock_pick.stock_symbol,
+              false,
+              approveDto.admin_response,
+            ),
+          );
+        }
+      }
+
+      return result;
     });
   }
 
@@ -758,7 +824,7 @@ export class StockPicksService {
         customerPick.status === CustomerPickStatus.APPROVED
           ? sp?.stock_symbol
           : undefined,
-      company: sp?.company || sp?.stock_symbol || 'N/A',
+      company: customerPick.status === CustomerPickStatus.APPROVED ? (sp?.company || sp?.stock_symbol || 'N/A') : 'N/A',
       buyPrice: this.formatMoney(targetPrice),
       currentPrice: this.formatMoney(currentPrice),
       change: this.formatPercent(changePercent),
