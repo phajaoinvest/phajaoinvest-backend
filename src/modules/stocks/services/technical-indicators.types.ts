@@ -163,7 +163,7 @@ export interface StockOverviewResponse {
   changePercent: number | null;
   group: string | null;
   metadata: {
-    provider: 'google-script' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | 'google-script' | null;
     sourceUrl: string | null;
     timestamp: Date;
     message?: string;

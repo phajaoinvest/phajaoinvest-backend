@@ -370,7 +370,6 @@ export class TechnicalIndicatorsService {
     symbol: string,
   ): Promise<GoogleSupportBreakRow | null> {
     const baseUrl = this.stockOverviewSourceUrl?.trim();
-    console.log({ baseUrl })
     if (!baseUrl) {
       this.logger.error('Stock overview dataset URL not configured');
       return null;
@@ -392,17 +391,28 @@ export class TechnicalIndicatorsService {
         return null;
       }
 
-      const payload =
-        (await response.json()) as GoogleStockOverviewResponse | null;
+      const payload = (await response.json()) as any;
 
-      if (!payload || payload.error || !payload.data) {
+      if (!payload || !payload.data) {
         this.logger.warn(
-          `Stock overview dataset returned no data for ${symbol}`,
+          `Stock overview dataset returned no data field for ${symbol}`,
         );
         return null;
       }
 
-      return payload.data;
+      // Handle both single object and array responses
+      const rows = Array.isArray(payload.data) ? payload.data : [payload.data];
+
+      // Find the specific ticker in the response (case-insensitive)
+      const targetRow = rows.find(
+        (row: any) => row.Ticker?.toUpperCase() === symbol.toUpperCase(),
+      );
+
+      if (!targetRow) {
+        this.logger.warn(`Ticker ${symbol} not found in script response`);
+      }
+
+      return targetRow || null;
     } catch (error) {
       this.logger.error('Error fetching stock overview dataset', error);
       return null;
@@ -1478,78 +1488,99 @@ export class TechnicalIndicatorsService {
       datasetRow.Ticker &&
       datasetRow.Ticker.toUpperCase() !== upper
     ) {
-      this.logger.warn(
-        `Google Script returned mismatched ticker ${datasetRow.Ticker} for requested symbol ${upper}. Discarding dataset row.`,
-      );
       datasetRow = null;
     }
-
-    const baseResponse: StockOverviewResponse = {
-      symbol: upper,
-      companyName: basics?.name ?? null,
-      supportLevel: null,
-      supportLevelSecondary: null,
-      resistance1: null,
-      resistance2: null,
-      rsi: null,
-      ema50: null,
-      ema200: null,
-      price: null,
-      changePrice: null,
-      changePercent: null,
-      group: null,
-      metadata: {
-        provider: this.stockOverviewSourceUrl ? 'google-script' : null,
-        sourceUrl: this.stockOverviewSourceUrl || null,
-        timestamp: new Date(),
-        message: undefined,
-      },
-    };
-
-    if (!datasetRow) {
-      baseResponse.metadata.message =
-        'Stock overview dataset unavailable or returned a mismatched ticker for requested symbol';
-      return baseResponse;
-    }
-
-    const ensureNumber = (value?: number | string): number | null => {
-      const parsed = this.normalizeNumeric(value);
-      return parsed !== null ? this.roundTo(parsed, 2) : null;
-    };
-
-    const price = ensureNumber(datasetRow.Price);
-    const changePercent = ensureNumber(datasetRow['Change %']);
-    const changePrice =
-      price !== null && changePercent !== null
-        ? this.roundTo((price * changePercent) / 100, 2)
-        : null;
 
     const response: StockOverviewResponse = {
       symbol: upper,
       companyName:
-        this.asString(datasetRow['Company name'])?.trim() ??
-        baseResponse.companyName,
-      supportLevel: ensureNumber(datasetRow['Support 1']),
-      supportLevelSecondary: ensureNumber(datasetRow['Support 2']),
-      resistance1: ensureNumber(datasetRow['Resistance 1']),
-      resistance2: ensureNumber(datasetRow['Resistance 2']),
-      rsi: ensureNumber(datasetRow.RSI),
-      ema50: ensureNumber(datasetRow['EMA 50']),
-      ema200: ensureNumber(datasetRow['EMA 200']),
-      price,
-      changePrice,
-      changePercent,
-      group: this.asString(datasetRow.Group)?.trim() ?? null,
+        basics?.name ||
+        this.asString(datasetRow?.['Company name'])?.trim() ||
+        null,
+      supportLevel: this.normalizeNumeric(datasetRow?.['Support 1']),
+      supportLevelSecondary: this.normalizeNumeric(datasetRow?.['Support 2']),
+      resistance1: this.normalizeNumeric(datasetRow?.['Resistance 1']),
+      resistance2: this.normalizeNumeric(datasetRow?.['Resistance 2']),
+      rsi: this.normalizeNumeric(datasetRow?.RSI),
+      ema50: this.normalizeNumeric(datasetRow?.['EMA 50']),
+      ema200: this.normalizeNumeric(datasetRow?.['EMA 200']),
+      price: this.normalizeNumeric(datasetRow?.Price),
+      changePrice: null,
+      changePercent: this.normalizeNumeric(datasetRow?.['Change %']),
+      group: this.asString(datasetRow?.Group)?.trim() ?? null,
       metadata: {
-        provider: 'google-script',
+        provider: datasetRow ? 'google-script' : null,
         sourceUrl: this.stockOverviewSourceUrl || null,
         timestamp: new Date(),
-        message:
-          datasetRow.Ticker && datasetRow.Ticker.toUpperCase() !== upper
-            ? `Dataset returned ${datasetRow.Ticker} instead of ${upper}`
-            : undefined,
+        message: datasetRow
+          ? undefined
+          : 'Live data calculation active (spreadsheet missing)',
       },
     };
+
+    // If Spreadsheet is missing OR FMP is primary, augment with live data
+    const useLive = this.primaryProvider === 'fmp' || !datasetRow;
+
+    if (useLive && this.fmpApiKey) {
+      this.logger.debug(`FMP: Orchestrating overview augmentation for ${upper}`);
+
+      const [quote, rsiSignal, e50, e200, supportResult] = await Promise.all([
+        this.fetchFmpQuote(upper),
+        this.getFmpRSI(upper),
+        this.getFmpEMA(upper, 50),
+        this.getFmpEMA(upper, 200),
+        this.computeSupportSnapshot(upper, 'day'),
+      ]);
+
+      if (quote) {
+        response.price = quote.price ?? response.price;
+        response.changePercent =
+          quote.changesPercentage ?? response.changePercent;
+        response.changePrice = quote.change ?? response.changePrice;
+        if (!response.companyName) response.companyName = quote.name;
+        response.metadata.provider = 'fmp';
+      }
+
+      if (rsiSignal) response.rsi = rsiSignal.rsi;
+      if (e50) response.ema50 = e50;
+      if (e200) response.ema200 = e200;
+
+      if (supportResult && supportResult.snapshot) {
+        const s = supportResult.snapshot;
+        response.supportLevel = s.supportLevel ?? response.supportLevel;
+        response.supportLevelSecondary =
+          s.supportLevelSecondary ?? response.supportLevelSecondary;
+        response.resistance1 = s.resistance1 ?? response.resistance1;
+        response.resistance2 = s.resistance2 ?? response.resistance2;
+        if (response.metadata.provider !== 'fmp') {
+          response.metadata.provider = supportResult.provider || 'fmp';
+        }
+      }
+    }
+
+    // Secondary fallback for changePrice
+    if (
+      response.price &&
+      response.changePercent &&
+      response.changePrice === null
+    ) {
+      response.changePrice = (response.price * response.changePercent) / 100;
+    }
+
+    // Final Rounding
+    response.price = this.roundTo(response.price, 2);
+    response.changePrice = this.roundTo(response.changePrice, 2);
+    response.changePercent = this.roundTo(response.changePercent, 2);
+    response.rsi = this.roundTo(response.rsi, 2);
+    response.ema50 = this.roundTo(response.ema50, 2);
+    response.ema200 = this.roundTo(response.ema200, 2);
+    response.supportLevel = this.roundTo(response.supportLevel, 2);
+    response.supportLevelSecondary = this.roundTo(
+      response.supportLevelSecondary,
+      2,
+    );
+    response.resistance1 = this.roundTo(response.resistance1, 2);
+    response.resistance2 = this.roundTo(response.resistance2, 2);
 
     return response;
   }
@@ -2749,6 +2780,94 @@ export class TechnicalIndicatorsService {
     }
   }
 
+  private async getFmpEMA(
+    symbol: string,
+    period: number,
+    interval: AlphaInterval = 'daily',
+  ): Promise<number | null> {
+    if (!this.fmpApiKey) return null;
+
+    const upper = symbol.toUpperCase();
+    const fmpInterval = interval === 'daily' ? 'daily' : '1min';
+    const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=ema&period=${period}&apikey=${this.fmpApiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as any[];
+      if (!Array.isArray(payload) || !payload.length) return null;
+
+      return payload[0]?.ema ?? null;
+    } catch (error) {
+      this.logger.debug(`FMP EMA error for ${upper} (${period}): ${error.message}`);
+      return null;
+    }
+  }
+
+  private async fetchFmpQuote(symbol: string): Promise<any | null> {
+    if (!this.fmpApiKey) return null;
+
+    const upper = symbol.toUpperCase();
+    const url = `https://financialmodelingprep.com/stable/quote?symbol=${upper}&apikey=${this.fmpApiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as any[];
+      if (!Array.isArray(payload) || !payload.length) return null;
+
+      return payload[0];
+    } catch (error) {
+      this.logger.debug(`FMP Quote error for ${upper}: ${error.message}`);
+      return null;
+    }
+  }
+
+  private async getFmpMarketMovers(
+    limit = 10,
+  ): Promise<MarketMoversResponse | null> {
+    if (!this.fmpApiKey) return null;
+
+    try {
+      const [gainersRes, losersRes] = await Promise.all([
+        fetch(
+          `https://financialmodelingprep.com/stable/stock-market/gainers?apikey=${this.fmpApiKey}`,
+        ),
+        fetch(
+          `https://financialmodelingprep.com/stable/stock-market/losers?apikey=${this.fmpApiKey}`,
+        ),
+      ]);
+
+      if (!gainersRes.ok || !losersRes.ok) return null;
+
+      const gainersRaw = (await gainersRes.json()) as any[];
+      const losersRaw = (await losersRes.json()) as any[];
+
+      const mapStock = (s: any): MarketMoverStock => ({
+        symbol: s.symbol,
+        lastPrice: this.roundTo(s.price, 2) ?? 0,
+        change: this.roundTo(s.change, 2) ?? 0,
+        changePercent: this.roundTo(s.changesPercentage, 2) ?? 0,
+        companyName: s.name || s.symbol,
+      });
+
+      return {
+        topGainers: Array.isArray(gainersRaw)
+          ? gainersRaw.slice(0, limit).map(mapStock)
+          : [],
+        topLosers: Array.isArray(losersRaw)
+          ? losersRaw.slice(0, limit).map(mapStock)
+          : [],
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      this.logger.debug(`FMP Market Movers error: ${error.message}`);
+      return null;
+    }
+  }
+
   private async fetchAlphaVantageMarketMovers(): Promise<AlphaVantageMarketMoversResponse | null> {
     if (!this.alphaVantageApiKey) {
       this.logger.error('Alpha Vantage API key not available');
@@ -2840,6 +2959,17 @@ export class TechnicalIndicatorsService {
   async getGoogleScriptMarketMovers(
     limitPerCategory = 10,
   ): Promise<MarketMoversResponse | null> {
+    // 1. Prioritize FMP if requested
+    if (this.primaryProvider === 'fmp' && this.fmpApiKey) {
+      const fmpMovers = await this.getFmpMarketMovers(limitPerCategory);
+      if (
+        fmpMovers &&
+        (fmpMovers.topGainers.length || fmpMovers.topLosers.length)
+      ) {
+        return fmpMovers;
+      }
+    }
+
     const rows = await this.fetchExternalAllUsMarketMoverRows();
     if (!rows) {
       return null;
