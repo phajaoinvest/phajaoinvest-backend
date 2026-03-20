@@ -5,7 +5,7 @@ export interface RSISignal {
   rsi: number;
   status: 'oversold' | 'neutral' | 'overbought';
   timestamp: Date;
-  provider: 'alphaVantage' | 'polygon' | 'google-script';
+  provider: 'alphaVantage' | 'polygon' | 'fmp' | 'google-script';
 }
 
 export interface MarketMoverStock {
@@ -175,7 +175,7 @@ export interface StockPriceHistoryResponse {
   companyName?: string | null;
   range: StockPriceHistoryRange;
   resolution: PriceResolution;
-  provider: 'polygon' | 'alphaVantage' | null;
+  provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
   points: StockPricePoint[];
   support?: SupportLevelsSnapshot | null;
   metadata: {
@@ -223,7 +223,7 @@ export interface StockPerformanceResponse {
   entries: StockPerformanceEntry[];
   latestClose?: number | null;
   metadata: {
-    provider: 'polygon' | 'alphaVantage' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
     from: number;
     to: number;
     count: number;
@@ -296,7 +296,7 @@ export interface StockRevenueResponse {
   results: PolygonFinancialResult[];
   metrics: StockFinancialMetrics;
   metadata: {
-    provider: 'polygon';
+    provider: 'fmp' | 'polygon';
     limit: number;
     timeframe: PolygonFinancialTimeframe;
     order: 'asc' | 'desc';
@@ -371,7 +371,7 @@ export interface CompanyDocumentsResponse {
     limit?: number;
   };
   metadata: {
-    provider: 'polygon' | 'sec' | 'google-script';
+    provider: 'fmp' | 'polygon' | 'sec' | 'google-script';
     total: number;
     hasMore: boolean;
     fetchedAt: Date;

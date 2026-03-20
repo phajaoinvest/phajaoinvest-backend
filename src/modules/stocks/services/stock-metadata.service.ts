@@ -95,17 +95,17 @@ export class StockMetadataService {
     'interactive media & services': 'Communication Services',
   };
 
-  // Cache profile lookups to avoid hitting API frequently (TTL simplistic)
   private profileCache = new Map<
     string,
-    { data: CompanyProfile; fetchedAt: number }
+    { data: CompanyProfile | null; fetchedAt: number }
   >();
   private readonly PROFILE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
+  private readonly MISS_TTL_MS = 1000 * 60 * 60; // 1 hour for failed lookups
 
   constructor(
     @InjectRepository(StockCategory)
     private readonly categoryRepository: Repository<StockCategory>,
-  ) {}
+  ) { }
 
   private getSystemUserId(): string | undefined {
     const v = process.env.SYSTEM_USER_ID?.trim();
@@ -122,16 +122,19 @@ export class StockMetadataService {
     }
 
     const upper = symbol.toUpperCase();
-    const url = `https://financialmodelingprep.com/api/v3/profile/${encodeURIComponent(
+    const url = `https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(
       upper,
-    )}?apikey=${apiKey}`;
+    )}&apikey=${apiKey}`;
 
     try {
       const response = await fetch(url);
       if (!response.ok) {
-        this.logger.warn(
-          `FMP profile request failed for ${upper} status=${response.status}`,
-        );
+        // Silent during plan restrictions (403) to avoid log noise
+        if (response.status !== 403) {
+          this.logger.debug(
+            `FMP profile request failed for ${upper} status=${response.status}`,
+          );
+        }
         return null;
       }
 
@@ -153,9 +156,45 @@ export class StockMetadataService {
         industry: raw.industry ?? raw.sector ?? undefined,
       };
     } catch (error) {
-      this.logger.warn(
-        `FMP profile error for ${upper}: ${
-          error instanceof Error ? error.message : error
+      this.logger.debug(
+        `FMP profile error for ${upper}: ${error instanceof Error ? error.message : error
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async fetchYahooProfile(
+    symbol: string,
+  ): Promise<CompanyProfile | null> {
+    const upper = symbol.toUpperCase();
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
+      upper,
+    )}`;
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        },
+      });
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as any;
+      const result = payload?.quoteResponse?.result?.[0];
+      if (!result) return null;
+
+      return {
+        symbol: upper,
+        name: result.longName ?? result.shortName ?? result.symbol,
+        country: result.region === 'US' ? 'USA' : result.region,
+        // Yahoo simple quote doesn't provide sector/industry reliably without extra modules.
+        sector: result.quoteType ?? undefined,
+      };
+    } catch (error) {
+      this.logger.debug(
+        `Yahoo metadata fallback error for ${upper}: ${error instanceof Error ? error.message : error
         }`,
       );
       return null;
@@ -179,7 +218,7 @@ export class StockMetadataService {
     try {
       const response = await fetch(url);
       if (!response.ok) {
-        this.logger.warn(
+        this.logger.debug(
           `Polygon ticker details request failed for ${upper} status=${response.status}`,
         );
         return null;
@@ -213,9 +252,8 @@ export class StockMetadataService {
         industry,
       };
     } catch (error) {
-      this.logger.warn(
-        `Polygon profile error for ${upper}: ${
-          error instanceof Error ? error.message : error
+      this.logger.debug(
+        `Polygon profile error for ${upper}: ${error instanceof Error ? error.message : error
         }`,
       );
       return null;
@@ -228,23 +266,38 @@ export class StockMetadataService {
     const upper = symbol.toUpperCase();
     const cached = this.profileCache.get(upper);
     const now = Date.now();
-    if (cached && now - cached.fetchedAt < this.PROFILE_TTL_MS) {
-      return cached.data;
+
+    if (cached) {
+      const ttl = cached.data ? this.PROFILE_TTL_MS : this.MISS_TTL_MS;
+      if (now - cached.fetchedAt < ttl) {
+        return cached.data;
+      }
     }
 
-    const sources: Array<() => Promise<CompanyProfile | null>> = [
-      () => this.fetchFmpProfile(upper),
-      () => this.fetchPolygonProfile(upper),
+    const sources: Array<{ name: string; fetcher: () => Promise<CompanyProfile | null> }> = [
+      { name: 'FMP', fetcher: () => this.fetchFmpProfile(upper) },
+      { name: 'Polygon', fetcher: () => this.fetchPolygonProfile(upper) },
+      { name: 'Yahoo', fetcher: () => this.fetchYahooProfile(upper) },
     ];
 
-    for (const fetcher of sources) {
-      const profile = await fetcher();
+    for (const source of sources) {
+      const profile = await source.fetcher();
       if (profile) {
+        if (source.name !== 'FMP') {
+          this.logger.debug(
+            `Resolved metadata for ${upper} via fallback: ${source.name}`,
+          );
+        }
         this.profileCache.set(upper, { data: profile, fetchedAt: now });
         return profile;
       }
     }
 
+    // All sources failed
+    this.logger.warn(
+      `Metadata resolution failed for ${upper} across all providers (FMP, Polygon, Yahoo)`,
+    );
+    this.profileCache.set(upper, { data: null, fetchedAt: now });
     return null;
   }
 

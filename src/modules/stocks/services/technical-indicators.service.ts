@@ -134,6 +134,8 @@ export class TechnicalIndicatorsService {
   private readonly logger = new Logger(TechnicalIndicatorsService.name);
   private readonly alphaVantageApiKey = process.env.ALPHA_VANTAGE_KEY;
   private readonly polygonApiKey = process.env.POLYGON_API_KEY;
+  private readonly fmpApiKey = process.env.FMP_API_KEY;
+  private readonly primaryProvider = process.env.MARKET_DATA_PRIMARY?.toLowerCase() || 'polygon';
 
   private readonly allowedUsExchanges = new Set<string>([
     'NASDAQ',
@@ -368,6 +370,7 @@ export class TechnicalIndicatorsService {
     symbol: string,
   ): Promise<GoogleSupportBreakRow | null> {
     const baseUrl = this.stockOverviewSourceUrl?.trim();
+    console.log({ baseUrl })
     if (!baseUrl) {
       this.logger.error('Stock overview dataset URL not configured');
       return null;
@@ -1144,49 +1147,91 @@ export class TechnicalIndicatorsService {
     from: number,
     to: number,
   ): Promise<{
-    provider: 'polygon' | 'alphaVantage' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
     points: StockPricePoint[];
     message?: string;
   }> {
     let message: string | undefined;
 
-    if (this.polygonApiKey) {
-      const polygonPoints = await this.fetchPolygonAggregates(
-        symbol,
-        resolution,
-        from,
-        to,
-      );
-      if (polygonPoints && polygonPoints.length) {
-        return { provider: 'polygon', points: polygonPoints };
+    const providers: Array<{
+      id: 'fmp' | 'polygon' | 'alphaVantage';
+      fetcher: () => Promise<StockPricePoint[] | null>;
+      key: string | undefined;
+    }> = [
+        { id: 'fmp', fetcher: () => this.fetchFmpSeries(symbol, resolution, from, to), key: this.fmpApiKey },
+        { id: 'polygon', fetcher: () => this.fetchPolygonAggregates(symbol, resolution, from, to), key: this.polygonApiKey },
+        { id: 'alphaVantage', fetcher: () => this.fetchAlphaVantageSeries(symbol, resolution, from, to), key: this.alphaVantageApiKey },
+      ];
+
+    // Reorder based on primary preference
+    if (this.primaryProvider === 'fmp') {
+      const fmpIdx = providers.findIndex(p => p.id === 'fmp');
+      if (fmpIdx > -1) {
+        const [fmp] = providers.splice(fmpIdx, 1);
+        providers.unshift(fmp);
       }
-      message = 'Polygon aggregates unavailable for requested range';
+    } else if (this.primaryProvider === 'alphavantage') {
+      const avIdx = providers.findIndex(p => p.id === 'alphaVantage');
+      if (avIdx > -1) {
+        const [av] = providers.splice(avIdx, 1);
+        providers.unshift(av);
+      }
     }
 
-    if (this.alphaVantageApiKey) {
-      const alphaPoints = await this.fetchAlphaVantageSeries(
-        symbol,
-        resolution,
-        from,
-        to,
-      );
-      if (alphaPoints && alphaPoints.length) {
-        return {
-          provider: 'alphaVantage',
-          points: alphaPoints,
-          message,
-        };
+    for (const p of providers) {
+      if (!p.key) continue;
+      const points = await p.fetcher();
+      if (points && points.length) {
+        return { provider: p.id, points };
       }
-      message = message
-        ? `${message}; Alpha Vantage returned no data`
-        : 'Alpha Vantage returned no data';
+      message = message ? `${message}; ${p.id} returned no data` : `${p.id} returned no data`;
     }
 
-    if (!this.polygonApiKey && !this.alphaVantageApiKey) {
-      message = 'No Polygon or Alpha Vantage API key configured';
+    if (!this.fmpApiKey && !this.polygonApiKey && !this.alphaVantageApiKey) {
+      message = 'No FMP, Polygon, or Alpha Vantage API key configured';
     }
 
     return { provider: null, points: [], message };
+  }
+
+  private async fetchFmpSeries(
+    symbol: string,
+    resolution: PriceResolution,
+    from: number,
+    to: number,
+  ): Promise<StockPricePoint[] | null> {
+    if (!this.fmpApiKey) return null;
+
+    const upper = symbol.toUpperCase();
+    const fromDate = this.formatDatePath(from * 1000);
+    const toDate = this.formatDatePath(to * 1000);
+    const url = `https://financialmodelingprep.com/stable/historical-price-eod/full?symbol=${encodeURIComponent(
+      upper,
+    )}&from=${fromDate}&to=${toDate}&apikey=${this.fmpApiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as any;
+      const historical = Array.isArray(payload) ? payload : payload?.historical;
+      if (!Array.isArray(historical)) return null;
+
+      const points: StockPricePoint[] = historical.map((h: any) => ({
+        timestamp: Date.parse(`${h.date}T00:00:00Z`),
+        date: new Date(`${h.date}T00:00:00Z`).toISOString(),
+        close: h.close,
+        volume: h.volume,
+      }));
+
+      points.sort((a, b) => a.timestamp - b.timestamp);
+
+      if (resolution === 'day') return points;
+      return this.aggregateSeries(points, resolution);
+    } catch (error) {
+      this.logger.debug(`FMP price history error: ${error.message}`);
+      return null;
+    }
   }
 
   private quantile(sorted: number[], q: number): number | null {
@@ -1342,7 +1387,7 @@ export class TechnicalIndicatorsService {
     currentPrice?: number | null,
   ): Promise<{
     snapshot: SupportLevelsSnapshot | null;
-    provider: 'polygon' | 'alphaVantage' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
     message?: string;
   }> {
     const now = Math.floor(Date.now() / 1000);
@@ -1423,9 +1468,21 @@ export class TechnicalIndicatorsService {
       .getCompanyBasics(upper)
       .catch(() => null);
 
-    const datasetRow = await this.fetchGoogleStockOverviewRow(upper).catch(
+    let datasetRow = await this.fetchGoogleStockOverviewRow(upper).catch(
       () => null,
     );
+
+    // Validate if the datasetRow actually matches the requested symbol
+    if (
+      datasetRow &&
+      datasetRow.Ticker &&
+      datasetRow.Ticker.toUpperCase() !== upper
+    ) {
+      this.logger.warn(
+        `Google Script returned mismatched ticker ${datasetRow.Ticker} for requested symbol ${upper}. Discarding dataset row.`,
+      );
+      datasetRow = null;
+    }
 
     const baseResponse: StockOverviewResponse = {
       symbol: upper,
@@ -1451,7 +1508,7 @@ export class TechnicalIndicatorsService {
 
     if (!datasetRow) {
       baseResponse.metadata.message =
-        'Stock overview dataset returned no data for requested symbol';
+        'Stock overview dataset unavailable or returned a mismatched ticker for requested symbol';
       return baseResponse;
     }
 
@@ -1545,7 +1602,7 @@ export class TechnicalIndicatorsService {
 
     if (!response.metadata.message && disabled) {
       response.metadata.message =
-        'No Polygon or Alpha Vantage API key configured for price history';
+        'No FMP, Polygon, or Alpha Vantage API key configured';
     }
 
     return response;
@@ -1564,14 +1621,22 @@ export class TechnicalIndicatorsService {
       sort?: 'asc' | 'desc';
     },
   ): Promise<PolygonAggregateBar[]> {
+    const upper = symbol.toUpperCase();
+
+    // Prioritize FMP if requested
+    if (this.primaryProvider === 'fmp' && this.fmpApiKey) {
+      const fmpBars = await this.fetchFmpPriceHistoryBars(upper, options);
+      if (fmpBars && fmpBars.length) {
+        return fmpBars;
+      }
+    }
+
     if (!this.polygonApiKey) {
       this.logger.warn(
         'POLYGON_API_KEY not configured; cannot fetch price history bars',
       );
       return [];
     }
-
-    const upper = symbol.toUpperCase();
     const multiplier = options?.multiplier ?? 1;
     const allowedTimespans: PolygonTimespan[] = [
       'minute',
@@ -1656,6 +1721,113 @@ export class TechnicalIndicatorsService {
     }
   }
 
+  private async fetchFmpPriceHistoryBars(
+    symbol: string,
+    options?: {
+      startDate?: string;
+      endDate?: string;
+      range?: StockPriceHistoryRange;
+      multiplier?: number;
+      timespan?: PolygonTimespan;
+      limit?: number;
+      adjusted?: boolean;
+      sort?: 'asc' | 'desc';
+    },
+  ): Promise<PolygonAggregateBar[]> {
+    if (!this.fmpApiKey) return [];
+
+    const multiplier = options?.multiplier ?? 1;
+    const timespan = options?.timespan ?? 'day';
+    const limit = options?.limit ?? 1000;
+    const sort = options?.sort ?? 'asc';
+
+    // FMP v3 historical-chart only supports common intraday intervals
+    // For day/week/month we use historical-price-full
+    const isIntraday = timespan === 'minute' || timespan === 'hour';
+
+    let url: string;
+    if (isIntraday) {
+      const interval = timespan === 'minute' ? '1min' : '1hour';
+      url = `https://financialmodelingprep.com/stable/historical-chart/${interval}/${symbol}?apikey=${this.fmpApiKey}`;
+    } else {
+      let fromDate = options?.startDate;
+      let toDate = options?.endDate;
+
+      if (!fromDate || !toDate) {
+        const { from } = this.resolveHistoryRange(options?.range ?? '6M');
+        const toSeconds = Math.floor(Date.now() / 1000);
+        if (!fromDate) fromDate = this.formatDatePath(from * 1000);
+        if (!toDate) toDate = this.formatDatePath(toSeconds * 1000);
+      }
+
+      const query = new URLSearchParams({
+        symbol: symbol,
+        from: fromDate,
+        to: toDate,
+        apikey: this.fmpApiKey,
+      });
+      url = `https://financialmodelingprep.com/stable/historical-price-eod/full?${query.toString()}`;
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return [];
+
+      const payload = await response.json();
+      let rawResults: any[] = Array.isArray(payload) ? payload : (payload?.historical || []);
+      if (!Array.isArray(rawResults) || !rawResults.length) return [];
+
+      let bars: PolygonAggregateBar[] = rawResults.map((item: any) => ({
+        v: item.volume,
+        o: item.open,
+        c: item.close,
+        h: item.high,
+        l: item.low,
+        t: Date.parse(item.date.includes(' ') ? item.date : `${item.date}T00:00:00Z`),
+        vw: item.vwap || item.close,
+      }));
+
+      // Filter by limit and sort
+      if (sort === 'desc') {
+        bars.sort((a, b) => b.t! - a.t!);
+      } else {
+        bars.sort((a, b) => a.t! - b.t!);
+      }
+
+      if (bars.length > limit) {
+        bars = sort === 'desc' ? bars.slice(0, limit) : bars.slice(-limit);
+      }
+
+      // Handle multiplier (Aggregation)
+      if (multiplier > 1) {
+        return this.aggregateFmpBars(bars, multiplier);
+      }
+
+      return bars;
+    } catch (e) {
+      this.logger.debug(`FMP price bars error: ${e.message}`);
+      return [];
+    }
+  }
+
+  private aggregateFmpBars(bars: PolygonAggregateBar[], multiplier: number): PolygonAggregateBar[] {
+    const results: PolygonAggregateBar[] = [];
+    for (let i = 0; i < bars.length; i += multiplier) {
+      const chunk = bars.slice(i, i + multiplier);
+      if (!chunk.length) continue;
+
+      const o = chunk[0].o;
+      const c = chunk[chunk.length - 1].c;
+      const h = Math.max(...chunk.map(b => b.h ?? 0));
+      const l = Math.min(...chunk.map(b => b.l ?? Infinity));
+      const v = chunk.reduce((acc, b) => acc + (b.v ?? 0), 0);
+      const t = chunk[chunk.length - 1].t;
+
+      results.push({ o, c, h, l, v, t });
+    }
+    return results;
+  }
+
   async getStockPerformance(symbol: string): Promise<StockPerformanceResponse> {
     const upper = symbol.toUpperCase();
     const basics = await this.stockMetadataService
@@ -1685,7 +1857,7 @@ export class TechnicalIndicatorsService {
     if (!history.points.length) {
       if (!response.metadata.message && disabled) {
         response.metadata.message =
-          'No Polygon or Alpha Vantage price data available for performance';
+          'No price data available (FMP/Polygon/AlphaVantage)';
       }
       return response;
     }
@@ -1731,19 +1903,31 @@ export class TechnicalIndicatorsService {
         netIncome: [],
       },
       metadata: {
-        provider: 'polygon',
+        provider: this.primaryProvider === 'fmp' ? 'fmp' : 'polygon',
         limit,
         timeframe,
         order,
         normalizedOrder: order,
         sort,
-        hasApiKey,
+        hasApiKey: Boolean(this.fmpApiKey || this.polygonApiKey),
         fetchedAt: new Date(),
         message: undefined,
       },
     };
 
-    if (!hasApiKey) {
+    if (base.metadata.provider === 'fmp') {
+      const fmpData = await this.fetchFmpFinancials(upper, limit, timeframe);
+      if (fmpData) {
+        base.results = fmpData.results;
+        base.metrics = fmpData.metrics;
+        base.count = fmpData.results.length;
+        base.status = 'OK';
+        return base;
+      }
+      base.metadata.message = 'FMP financials unavailable; falling back to Polygon';
+    }
+
+    if (!this.polygonApiKey) {
       base.metadata.message =
         'POLYGON_API_KEY not configured; cannot fetch revenue';
       return base;
@@ -1815,6 +1999,53 @@ export class TechnicalIndicatorsService {
         error,
       );
       return base;
+    }
+  }
+
+  private async fetchFmpFinancials(
+    symbol: string,
+    limit: number,
+    timeframe: PolygonFinancialTimeframe,
+  ): Promise<{
+    results: PolygonFinancialResult[];
+    metrics: StockFinancialMetrics;
+  } | null> {
+    if (!this.fmpApiKey) return null;
+
+    const periodStr = timeframe === 'quarterly' ? 'period=quarter' : 'period=annual';
+    const url = `https://financialmodelingprep.com/stable/income-statement?symbol=${symbol}&${periodStr}&limit=${limit}&apikey=${this.fmpApiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as any[];
+      if (!Array.isArray(payload)) return null;
+
+      const results: PolygonFinancialResult[] = payload.map((f: any) => ({
+        start_date: f.date,
+        end_date: f.date,
+        fiscal_period: f.period,
+        fiscal_year: f.calendarYear,
+        filing_date: f.fillingDate,
+        financials: {
+          income_statement: {
+            revenues: { value: f.revenue },
+            gross_profit: { value: f.grossProfit },
+            operating_income_loss: { value: f.operatingIncome },
+            net_income_loss: { value: f.netIncome },
+          },
+        },
+      }));
+
+      // Sort chronological for buildFinancialMetrics
+      const sorted = this.sortFinancialResults(results);
+      const metrics = this.buildFinancialMetrics(sorted, timeframe);
+
+      return { results: sorted, metrics };
+    } catch (error) {
+      this.logger.debug(`FMP Financials error: ${error.message}`);
+      return null;
     }
   }
 
@@ -1921,24 +2152,91 @@ export class TechnicalIndicatorsService {
       },
     };
 
-    // Try Polygon first (if available), then fallback to SEC.gov
-    if (this.polygonApiKey) {
-      const polygonResult = await this.fetchPolygonFilings(
-        upper,
-        type,
-        limit,
-        order,
-      );
-      if (polygonResult.success && polygonResult.data) {
-        return polygonResult.data;
+    // Order providers based on primary preference
+    const providers: Array<{
+      id: 'fmp' | 'polygon' | 'sec';
+      fetcher: () => Promise<CompanyDocumentsResponse | null>;
+    }> = [
+        {
+          id: 'fmp', fetcher: async () => {
+            const res = await this.fetchFmpFilings(upper, type, limit, order);
+            return res.success ? res.data! : null;
+          }
+        },
+        {
+          id: 'polygon', fetcher: async () => {
+            const res = await this.fetchPolygonFilings(upper, type, limit, order);
+            return res.success ? res.data! : null;
+          }
+        },
+      ];
+
+    if (this.primaryProvider === 'fmp') {
+      const fmpIdx = providers.findIndex(p => p.id === 'fmp');
+      if (fmpIdx > -1) {
+        const [fmp] = providers.splice(fmpIdx, 1);
+        providers.unshift(fmp);
       }
-      this.logger.debug(
-        `Polygon filings not available (${polygonResult.error}), falling back to SEC.gov`,
-      );
     }
 
-    // Fallback to SEC.gov EDGAR API (free, no API key needed)
+    for (const p of providers) {
+      const data = await p.fetcher();
+      if (data && data.documents.length) {
+        return data;
+      }
+    }
+
+    // Default Fallback
     return this.fetchSECFilings(upper, type, limit, order, response);
+  }
+
+  private async fetchFmpFilings(
+    symbol: string,
+    type: string | undefined,
+    limit: number,
+    order: string,
+  ): Promise<{ success: boolean; data?: CompanyDocumentsResponse; error?: string }> {
+    if (!this.fmpApiKey) return { success: false, error: 'No FMP key' };
+
+    const url = `https://financialmodelingprep.com/stable/sec-filings?symbol=${symbol}&limit=${limit}&apikey=${this.fmpApiKey}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
+
+      const payload = (await res.json()) as any[];
+      if (!Array.isArray(payload) || !payload.length) return { success: false, error: 'No results' };
+
+      const filtered = type ? payload.filter(f => f.type === type) : payload;
+
+      const data: CompanyDocumentsResponse = {
+        symbol,
+        companyName: null,
+        cik: payload[0]?.cik || null,
+        documents: filtered.map(f => ({
+          id: f.link || Math.random().toString(),
+          type: f.type || 'UNKNOWN',
+          title: this.generateDocumentTitle(f.type, f.fillingDate.split('-')[0]),
+          description: `${f.type} filing for ${symbol}`,
+          filingDate: f.fillingDate,
+          periodDate: f.fillingDate,
+          url: f.finalLink || f.link,
+          fileUrl: f.link,
+          acceptanceDateTime: f.acceptedDate,
+          cik: f.cik,
+          tags: this.generateDocumentTags(f.type),
+        })),
+        filteredBy: { type, limit },
+        metadata: {
+          provider: 'fmp',
+          total: filtered.length,
+          hasMore: payload.length >= limit,
+          fetchedAt: new Date(),
+        }
+      };
+      return { success: true, data };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
   }
 
   private async fetchPolygonFilings(
@@ -2386,7 +2684,7 @@ export class TechnicalIndicatorsService {
       window,
       fallback = true,
     }: {
-      provider?: 'polygon' | 'alphaVantage';
+      provider?: 'fmp' | 'polygon' | 'alphaVantage';
       interval?: AlphaInterval;
       timeperiod?: number;
       timespan?: PolygonTimespan;
@@ -2395,9 +2693,16 @@ export class TechnicalIndicatorsService {
     } = {},
   ): Promise<RSISignal | null> {
     const preferredProvider =
-      provider ?? (this.polygonApiKey ? 'polygon' : 'alphaVantage');
+      provider ?? this.primaryProvider;
 
-    if (preferredProvider === 'polygon') {
+    if (preferredProvider === 'fmp') {
+      const fmpResult = await this.getFmpRSI(symbol, interval, timeperiod);
+      if (fmpResult || provider === 'fmp' || !fallback) {
+        return fmpResult;
+      }
+    }
+
+    if (preferredProvider === 'polygon' || (preferredProvider === 'fmp' && fallback)) {
       const polygonResult = await this.getPolygonRSI(
         symbol,
         timespan,
@@ -2410,6 +2715,38 @@ export class TechnicalIndicatorsService {
     }
 
     return this.getAlphaVantageRSI(symbol, interval, timeperiod);
+  }
+
+  async getFmpRSI(
+    symbol: string,
+    interval: AlphaInterval = 'daily',
+    timeperiod = 14,
+  ): Promise<RSISignal | null> {
+    if (!this.fmpApiKey) return null;
+
+    const upper = symbol.toUpperCase();
+    const fmpInterval = interval === 'daily' ? 'daily' : '1min'; // simplified
+    const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as any[];
+      if (!Array.isArray(payload) || !payload.length) return null;
+
+      const latest = payload[0];
+      return {
+        symbol: upper,
+        rsi: this.roundTo(latest.rsi, 2) ?? latest.rsi,
+        status: this.classifyRsi(latest.rsi),
+        timestamp: new Date(latest.date),
+        provider: 'fmp',
+      };
+    } catch (error) {
+      this.logger.debug(`FMP RSI error: ${error.message}`);
+      return null;
+    }
   }
 
   private async fetchAlphaVantageMarketMovers(): Promise<AlphaVantageMarketMoversResponse | null> {
