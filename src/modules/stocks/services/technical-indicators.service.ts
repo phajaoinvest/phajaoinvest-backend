@@ -8,6 +8,7 @@ import {
   PolygonAggregateBar,
   PriceResolution,
   RSISignal,
+  StockNewsItem,
   StockNewsResponse,
   StockOverviewResponse,
   StockPerformanceEntry,
@@ -1215,10 +1216,12 @@ export class TechnicalIndicatorsService {
     const upper = symbol.toUpperCase();
     const fromDate = this.formatDatePath(from * 1000);
     const toDate = this.formatDatePath(to * 1000);
-    const url = `https://financialmodelingprep.com/stable/historical-price-eod/full?symbol=${encodeURIComponent(
+    const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${encodeURIComponent(
       upper,
-    )}&from=${fromDate}&to=${toDate}&apikey=${this.fmpApiKey}`;
+    )}?from=${fromDate}&to=${toDate}&apikey=${this.fmpApiKey}`;
 
+    // const url = `https://financialmodelingprep.com/stable/historical-price-eod/full?symbol=${encodeURIComponent(
+    //   )}&from=${fromDate}&to=${toDate}&apikey=${this.fmpApiKey}`;
     try {
       const response = await fetch(url);
       if (!response.ok) return null;
@@ -1413,13 +1416,13 @@ export class TechnicalIndicatorsService {
     };
   }
 
-  private findPointAtOrAfter(
+  private findPointOnOrBefore(
     points: StockPricePoint[],
     targetMs: number,
   ): StockPricePoint | null {
-    for (const point of points) {
-      if (point.timestamp >= targetMs) {
-        return point;
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (points[i].timestamp <= targetMs) {
+        return points[i];
       }
     }
     return points.length ? points[0] : null;
@@ -1433,18 +1436,18 @@ export class TechnicalIndicatorsService {
     }
 
     const latest = points[points.length - 1];
-    const nowMs = Date.now();
+    const latestMs = latest.timestamp;
 
     return this.performanceTimeframes.map(({ label, days, mode }) => {
-      let targetMs = nowMs;
+      let targetMs = latestMs;
       if (mode === 'YTD') {
-        const now = new Date();
-        targetMs = Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0);
+        const latestDate = new Date(latestMs);
+        targetMs = Date.UTC(latestDate.getUTCFullYear(), 0, 1, 0, 0, 0);
       } else if (typeof days === 'number') {
-        targetMs = nowMs - days * 86400 * 1000;
+        targetMs = latestMs - days * 86400 * 1000;
       }
 
-      const baseline = this.findPointAtOrAfter(points, targetMs);
+      const baseline = this.findPointOnOrBefore(points, targetMs);
       if (!baseline || baseline.close === null) {
         return {
           timeframe: label,
@@ -1779,7 +1782,8 @@ export class TechnicalIndicatorsService {
     let url: string;
     if (isIntraday) {
       const interval = timespan === 'minute' ? '1min' : '1hour';
-      url = `https://financialmodelingprep.com/stable/historical-chart/${interval}/${symbol}?apikey=${this.fmpApiKey}`;
+      url = `https://financialmodelingprep.com/api/v3/historical-chart/${interval}/${symbol}?apikey=${this.fmpApiKey}`;
+      // url = `https://financialmodelingprep.com/stable/historical-chart/${interval}/${symbol}?apikey=${this.fmpApiKey}`;
     } else {
       let fromDate = options?.startDate;
       let toDate = options?.endDate;
@@ -1792,12 +1796,13 @@ export class TechnicalIndicatorsService {
       }
 
       const query = new URLSearchParams({
-        symbol: symbol,
+        //  symbol: symbol,
         from: fromDate,
         to: toDate,
         apikey: this.fmpApiKey,
       });
-      url = `https://financialmodelingprep.com/stable/historical-price-eod/full?${query.toString()}`;
+      url = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?${query.toString()}`;
+      // url = `https://financialmodelingprep.com/stable/historical-price-eod/full?${query.toString()}`;
     }
 
     try {
@@ -2044,7 +2049,8 @@ export class TechnicalIndicatorsService {
     if (!this.fmpApiKey) return null;
 
     const periodStr = timeframe === 'quarterly' ? 'period=quarter' : 'period=annual';
-    const url = `https://financialmodelingprep.com/stable/income-statement?symbol=${symbol}&${periodStr}&limit=${limit}&apikey=${this.fmpApiKey}`;
+    const url = `https://financialmodelingprep.com/api/v3/income-statement/${symbol}?${periodStr}&limit=${limit}&apikey=${this.fmpApiKey}`;
+    // const url = `https://financialmodelingprep.com/stable/income-statement?symbol=${symbol}&${periodStr}&limit=${limit}&apikey=${this.fmpApiKey}`;
 
     try {
       const response = await fetch(url);
@@ -2080,70 +2086,130 @@ export class TechnicalIndicatorsService {
     }
   }
 
+  private async fetchPolygonNews(symbol: string, limit: number): Promise<StockNewsItem[] | null> {
+    if (!this.polygonApiKey) return null;
+    const url = `https://api.polygon.io/v2/reference/news?ticker=${symbol}&limit=${limit}&apiKey=${this.polygonApiKey}`;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const data = await resp.json() as any;
+      if (!data?.results || !Array.isArray(data.results)) return null;
+
+      return data.results.map((item: any) => ({
+        title: item.title || 'Unknown headline',
+        description: item.description || null,
+        source: item.publisher?.name || item.author || 'Polygon',
+        url: item.article_url || null,
+        publishedAt: item.published_utc || null,
+        imageUrl: item.image_url || null,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  private async fetchFmpNews(symbol: string, limit: number): Promise<StockNewsItem[] | null> {
+    if (!this.fmpApiKey) return null;
+    const url = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${symbol}&limit=${limit}&apikey=${this.fmpApiKey}`;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const data = await resp.json() as any;
+      if (!Array.isArray(data)) return null;
+
+      return data.map((item: any) => ({
+        title: item.title || 'Unknown headline',
+        description: item.text || null,
+        source: item.site || 'FMP',
+        url: item.url || null,
+        publishedAt: item.publishedDate || null,
+        imageUrl: item.image || null,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
   async getStockNews(symbol: string, limit = 6): Promise<StockNewsResponse> {
     const upper = symbol.toUpperCase();
     const normalizedLimit =
       Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 50) : 6;
 
     const metadata = {
-      provider: 'google-script' as const,
+      provider: 'google-script' as any,
       limit: normalizedLimit,
-      hasApiKey: Boolean(this.stockNewsSourceUrl),
+      hasApiKey: Boolean(this.stockNewsSourceUrl || this.polygonApiKey || this.fmpApiKey),
       fetchedAt: new Date(),
       message: undefined as string | undefined,
     };
 
-    const rows = await this.fetchGoogleStockNewsRows();
-    if (!rows) {
-      metadata.message =
-        'Stock news dataset unavailable; configure STOCK_NEWS_SOURCE_URL';
-      return {
-        symbol: upper,
-        items: [],
-        metadata,
+    const fetchGoogle = async (): Promise<StockNewsItem[] | null> => {
+      const rows = await this.fetchGoogleStockNewsRows();
+      if (!rows) return null;
+      const filtered = rows.filter((row) => this.asString(row.ticker)?.trim().toUpperCase() === upper);
+      if (filtered.length === 0) return null;
+
+      const toTimestamp = (value?: string): number => {
+        if (!value) return 0;
+        const time = new Date(value).getTime();
+        return Number.isNaN(time) ? 0 : time;
       };
-    }
 
-    const filtered = rows.filter((row) => {
-      const ticker = this.asString(row.ticker)?.trim().toUpperCase();
-      return ticker === upper;
-    });
-
-    if (!filtered.length) {
-      metadata.message = `No news entries found for ${upper} in Google dataset`;
-      return {
-        symbol: upper,
-        items: [],
-        metadata,
-      };
-    }
-
-    const toTimestamp = (value?: string): number => {
-      if (!value) {
-        return 0;
-      }
-      const time = new Date(value).getTime();
-      return Number.isNaN(time) ? 0 : time;
+      return filtered
+        .sort((a, b) => toTimestamp(b.publishedAt) - toTimestamp(a.publishedAt))
+        .slice(0, normalizedLimit)
+        .map((row) => ({
+          title: this.asString(row.title) ?? 'Unknown headline',
+          title_th: this.asString(row.title_th) ?? 'Unknown headline',
+          description: this.asString(row.description) ?? null,
+          description_th: this.asString(row.description_th) ?? null,
+          source: this.asString(row.source) ?? null,
+          url: this.asString(row.url) ?? null,
+          publishedAt: this.asString(row.publishedAt) ?? null,
+          imageUrl: this.asString(row.image) ?? null,
+          topicTags: this.asString(row.topics),
+          sentiment: this.asString(row.sentiment) ?? null,
+        }));
     };
 
-    const items = filtered
-      .sort((a, b) => toTimestamp(b.publishedAt) - toTimestamp(a.publishedAt))
-      .slice(0, normalizedLimit)
-      .map((row) => ({
-        title: this.asString(row.title) ?? 'Unknown headline',
-        title_th: this.asString(row.title_th) ?? 'Unknown headline',
-        description: this.asString(row.description) ?? null,
-        description_th: this.asString(row.description_th) ?? null,
-        source: this.asString(row.source) ?? null,
-        url: this.asString(row.url) ?? null,
-        publishedAt: this.asString(row.publishedAt) ?? null,
-        imageUrl: this.asString(row.image) ?? null,
-        topicTags: this.asString(row.topics),
-        sentiment: this.asString(row.sentiment) ?? null,
-      }));
+    const providers = [
+      { id: 'google-script', fetcher: fetchGoogle, key: Boolean(this.stockNewsSourceUrl) },
+      { id: 'fmp', fetcher: () => this.fetchFmpNews(upper, normalizedLimit), key: Boolean(this.fmpApiKey) },
+      { id: 'polygon', fetcher: () => this.fetchPolygonNews(upper, normalizedLimit), key: Boolean(this.polygonApiKey) },
+    ];
+
+    // Priorities: If MARKET_DATA_PRIMARY is fmp, move FMP to the front
+    if (this.primaryProvider === 'fmp') {
+      const idx = providers.findIndex(p => p.id === 'fmp');
+      if (idx > -1) {
+        const [fmp] = providers.splice(idx, 1);
+        providers.unshift(fmp);
+      }
+    } else if (this.primaryProvider === 'polygon') {
+      const idx = providers.findIndex(p => p.id === 'polygon');
+      if (idx > -1) {
+        const [poly] = providers.splice(idx, 1);
+        providers.unshift(poly);
+      }
+    }
+
+    let items: StockNewsItem[] = [];
+    let providerName = 'google-script';
+
+    for (const p of providers) {
+      if (!p.key && p.id !== 'google-script') continue; // google-script key logic is softer
+      const result = await p.fetcher();
+      if (result && result.length > 0) {
+        items = result;
+        providerName = p.id;
+        break;
+      }
+    }
+
+    metadata.provider = providerName;
 
     if (!items.length) {
-      metadata.message = 'No valid news entries after processing dataset rows';
+      metadata.message = `No news entries found for ${upper}`;
     }
 
     return {
@@ -2229,7 +2295,8 @@ export class TechnicalIndicatorsService {
   ): Promise<{ success: boolean; data?: CompanyDocumentsResponse; error?: string }> {
     if (!this.fmpApiKey) return { success: false, error: 'No FMP key' };
 
-    const url = `https://financialmodelingprep.com/stable/sec-filings?symbol=${symbol}&limit=${limit}&apikey=${this.fmpApiKey}`;
+    const url = `https://financialmodelingprep.com/api/v3/sec_filings/${symbol}?limit=${limit}&apikey=${this.fmpApiKey}`;
+    // const url = `https://financialmodelingprep.com/stable/sec-filings?symbol=${symbol}&limit=${limit}&apikey=${this.fmpApiKey}`;
     try {
       const res = await fetch(url);
       if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
@@ -2757,7 +2824,8 @@ export class TechnicalIndicatorsService {
 
     const upper = symbol.toUpperCase();
     const fmpInterval = interval === 'daily' ? 'daily' : '1min'; // simplified
-    const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`;
+    const url = `https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}?type=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`;
+    // const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`;
 
     try {
       const response = await fetch(url);
@@ -2789,8 +2857,8 @@ export class TechnicalIndicatorsService {
 
     const upper = symbol.toUpperCase();
     const fmpInterval = interval === 'daily' ? 'daily' : '1min';
-    const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=ema&period=${period}&apikey=${this.fmpApiKey}`;
-
+    const url = `https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}?type=ema&period=${period}&apikey=${this.fmpApiKey}`;
+    // const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=ema&period=${period}&apikey=${this.fmpApiKey}`;
     try {
       const response = await fetch(url);
       if (!response.ok) return null;
@@ -2809,8 +2877,8 @@ export class TechnicalIndicatorsService {
     if (!this.fmpApiKey) return null;
 
     const upper = symbol.toUpperCase();
-    const url = `https://financialmodelingprep.com/stable/quote?symbol=${upper}&apikey=${this.fmpApiKey}`;
-
+    const url = `https://financialmodelingprep.com/api/v3/quote/${upper}?apikey=${this.fmpApiKey}`;
+    // const url = `https://financialmodelingprep.com/stable/quote?symbol=${upper}&apikey=${this.fmpApiKey}`;
     try {
       const response = await fetch(url);
       if (!response.ok) return null;
@@ -2833,10 +2901,12 @@ export class TechnicalIndicatorsService {
     try {
       const [gainersRes, losersRes] = await Promise.all([
         fetch(
-          `https://financialmodelingprep.com/stable/stock-market/gainers?apikey=${this.fmpApiKey}`,
+          `https://financialmodelingprep.com/api/v3/stock_market/gainers?apikey=${this.fmpApiKey}`,
+          // `https://financialmodelingprep.com/stable/stock-market/gainers?apikey=${this.fmpApiKey}`,
         ),
         fetch(
-          `https://financialmodelingprep.com/stable/stock-market/losers?apikey=${this.fmpApiKey}`,
+          `https://financialmodelingprep.com/api/v3/stock_market/losers?apikey=${this.fmpApiKey}`,
+          // `https://financialmodelingprep.com/stable/stock-market/losers?apikey=${this.fmpApiKey}`,
         ),
       ]);
 
