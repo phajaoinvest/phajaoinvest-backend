@@ -28,6 +28,13 @@ export class Wallet {
   total_cash: number;
 
   @Column({
+    type: 'float',
+    default: 20000,
+    comment: 'Demo trading balance - separate from real money. Default $20,000',
+  })
+  demo_balance: number;
+
+  @Column({
     type: 'enum',
     enum: WalletStatus,
     default: WalletStatus.ACTIVE,

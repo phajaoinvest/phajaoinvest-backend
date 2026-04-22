@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsOptional,
   IsUUID,
+  IsBoolean,
   Min,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -36,6 +37,19 @@ export class CreateStockDto {
   @IsUUID()
   @IsOptional()
   stock_categories_id?: string;
+
+  @ApiPropertyOptional({ example: 10000, description: 'Max investment per paper trade' })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  max_investment?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Show ticker symbol to customers' })
+  @IsOptional()
+  show_symbol?: boolean;
 }
 
 export class UpdateStockDto {
@@ -55,6 +69,36 @@ export class UpdateStockDto {
   @IsOptional()
   symbol?: string;
 
+  @ApiPropertyOptional({ example: 'A tech company', description: 'Stock description' })
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @ApiPropertyOptional({ example: 'Technology', description: 'Stock sector' })
+  @IsString()
+  @IsOptional()
+  sector?: string;
+
+  @ApiPropertyOptional({ example: 'Consumer Electronics', description: 'Stock industry' })
+  @IsString()
+  @IsOptional()
+  industry?: string;
+
+  @ApiPropertyOptional({ example: 'US', description: 'Country' })
+  @IsString()
+  @IsOptional()
+  country?: string;
+
+  @ApiPropertyOptional({ example: 'NASDAQ', description: 'Exchange' })
+  @IsString()
+  @IsOptional()
+  exchange?: string;
+
+  @ApiPropertyOptional({ example: 'USD', description: 'Currency' })
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
   @ApiPropertyOptional({ example: 180.5, description: 'Updated price' })
   @IsNumber()
   @Min(0)
@@ -71,6 +115,33 @@ export class UpdateStockDto {
   @IsUUID()
   @IsOptional()
   stock_categories_id?: string;
+
+  @ApiPropertyOptional({
+    example: '77777777-8888-9999-aaaa-bbbbbbbbbbbb',
+    description: 'Category ID (alias for stock_categories_id)',
+  })
+  @IsUUID()
+  @IsOptional()
+  category_id?: string;
+
+  @ApiPropertyOptional({ example: 10000, description: 'Max investment per paper trade' })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  max_investment?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Show ticker symbol to customers' })
+  @IsBoolean()
+  @IsOptional()
+  show_symbol?: boolean;
+
+  @ApiPropertyOptional({ example: false, description: 'Enable stock for demo/paper trading (Guess Buy)' })
+  @IsBoolean()
+  @IsOptional()
+  is_demo?: boolean;
 }
 
 export class StockResponseDto {
@@ -171,6 +242,15 @@ export class StockResponseDto {
 
   @ApiPropertyOptional({ example: true, description: 'Is active' })
   is_active?: boolean;
+
+  @ApiPropertyOptional({ example: 10000, description: 'Max investment per paper trade' })
+  max_investment?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Show ticker symbol to customers' })
+  show_symbol?: boolean;
+
+  @ApiPropertyOptional({ example: false, description: 'Available for demo/paper trading' })
+  is_demo?: boolean;
 
   // Market Hours & Status
   @ApiPropertyOptional({ example: 'OPEN', description: 'Market status' })

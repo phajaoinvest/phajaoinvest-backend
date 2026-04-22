@@ -80,7 +80,6 @@ export class StocksService {
   async create(createStockDto: CreateStockDto): Promise<StockResponseDto> {
     const stock = this.stockRepository.create({
       ...createStockDto,
-      created_by: 'system', // In real app, get from authenticated user
     });
 
     const savedStock = await this.stockRepository.save(stock);
@@ -97,8 +96,14 @@ export class StocksService {
       throw new NotFoundException(`Stock with ID ${id} not found`);
     }
 
+    // Handle category_id alias
+    if (updateStockDto.category_id && !updateStockDto.stock_categories_id) {
+      updateStockDto.stock_categories_id = updateStockDto.category_id;
+    }
+    // Remove alias so it doesn't get assigned to non-existent column
+    delete updateStockDto.category_id;
+
     Object.assign(stock, updateStockDto);
-    stock.updated_by = 'system'; // In real app, get from authenticated user
 
     await this.stockRepository.save(stock);
     return this.findOne(id);
@@ -298,6 +303,9 @@ export class StocksService {
       min_size: stock.min_size,
       is_tradable: stock.is_tradable,
       is_active: stock.is_active,
+      max_investment: stock.max_investment,
+      show_symbol: stock.show_symbol,
+      is_demo: stock.is_demo,
       market_status: stock.market_status,
       market_open_time: stock.market_open_time,
       market_close_time: stock.market_close_time,

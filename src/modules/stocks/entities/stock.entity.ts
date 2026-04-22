@@ -196,6 +196,31 @@ export class Stock {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
+  // Paper Trading Controls
+  @Column({
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    default: 10000,
+    comment: 'Maximum investment amount allowed per paper trade',
+  })
+  max_investment: number;
+
+  @Column({
+    type: 'boolean',
+    default: true,
+    comment: 'Whether to show the ticker symbol to customers',
+  })
+  show_symbol: boolean;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+    comment: 'Whether this stock is available for demo/paper trading (Guess Buy)',
+  })
+  is_demo: boolean;
+
   // Market Hours & Status
   @Column({
     type: 'varchar',

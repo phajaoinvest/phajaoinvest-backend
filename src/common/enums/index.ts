@@ -97,3 +97,8 @@ export enum RiskTolerance {
   MEDIUM = 'medium',
   HIGH = 'high',
 }
+
+export enum PaperTradeStatus {
+  OPEN = 'open',
+  CLOSED = 'closed',
+}

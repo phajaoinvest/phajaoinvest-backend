@@ -104,33 +104,28 @@ function isIEXQuote(v: unknown): v is IEXQuoteResponseShape {
   return !!v && typeof v === 'object' && 'latestPrice' in v;
 }
 
-// Yahoo Finance response
-interface YahooQuoteRaw {
+// Yahoo Finance response (using chart API as quote API is blocked)
+interface YahooChartMetaRaw {
   symbol?: string;
   regularMarketPrice?: number;
-  regularMarketOpen?: number;
+  chartPreviousClose?: number;
   regularMarketDayHigh?: number;
   regularMarketDayLow?: number;
-  regularMarketPreviousClose?: number;
   regularMarketVolume?: number;
-  bid?: number;
-  ask?: number;
-  bidSize?: number;
-  askSize?: number;
   regularMarketTime?: number;
   [k: string]: unknown;
 }
-interface YahooQuoteResponseShape {
-  quoteResponse?: { result?: YahooQuoteRaw[] };
+interface YahooChartResponseShape {
+  chart?: { result?: Array<{ meta?: YahooChartMetaRaw }> };
   [k: string]: unknown;
 }
-function isYahooResponse(v: unknown): v is YahooQuoteResponseShape {
+function isYahooResponse(v: unknown): v is YahooChartResponseShape {
   if (!v || typeof v !== 'object') return false;
-  if (!('quoteResponse' in v)) return false;
-  const qr = (v as Record<string, unknown>).quoteResponse;
-  if (!qr || typeof qr !== 'object') return false;
-  const result = (qr as { result?: unknown }).result;
-  return !result || Array.isArray(result);
+  if (!('chart' in v)) return false;
+  const chart = (v as Record<string, unknown>).chart;
+  if (!chart || typeof chart !== 'object') return false;
+  const result = (chart as { result?: unknown }).result;
+  return Array.isArray(result);
 }
 
 // Financial Modeling Prep (FMP) response
@@ -422,14 +417,14 @@ export class ExternalPriceFetcherService {
     };
   }
 
-  // Unofficial Yahoo Finance single quote (rapid or fallback). Using rapid's finance endpoint would need a key; here we try a public endpoint pattern.
+  // Unofficial Yahoo Finance single quote via chart API (quote endpoint blocked)
   private async fetchYahoo(symbol: string): Promise<ExternalQuote | null> {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
       symbol,
-    )}`;
+    )}?interval=1d&range=1d`;
     let res: Response;
     try {
-      res = await fetch(url);
+      res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     } catch {
       return null;
     }
@@ -440,23 +435,18 @@ export class ExternalPriceFetcherService {
     } catch {
       return null;
     }
-    if (!isYahooResponse(json) || !json.quoteResponse?.result?.length) {
+    if (!isYahooResponse(json) || !json.chart?.result?.length) {
       return null;
     }
-    const r = json.quoteResponse.result[0];
+    const r = json.chart.result[0].meta;
     if (!r || typeof r.regularMarketPrice !== 'number') return null;
     return {
       symbol: r.symbol || symbol,
       price: r.regularMarketPrice,
-      open: toNumber(r.regularMarketOpen),
       high: toNumber(r.regularMarketDayHigh),
       low: toNumber(r.regularMarketDayLow),
-      previousClose: toNumber(r.regularMarketPreviousClose),
+      previousClose: toNumber(r.chartPreviousClose),
       volume: toNumber(r.regularMarketVolume),
-      bid: toNumber(r.bid),
-      ask: toNumber(r.ask),
-      bidSize: toNumber(r.bidSize),
-      askSize: toNumber(r.askSize),
       provider: 'yahoo',
       timestamp: new Date(
         typeof r.regularMarketTime === 'number'
@@ -469,9 +459,9 @@ export class ExternalPriceFetcherService {
   // Financial Modeling Prep (FMP) real-time quote endpoint
   private async fetchFMP(symbol: string): Promise<ExternalQuote | null> {
     if (!process.env.FMP_API_KEY) return null;
-    const url = `https://financialmodelingprep.com/api/v3/quote/${encodeURIComponent(
+    const url = `https://financialmodelingprep.com/stable/quote?symbol=${encodeURIComponent(
       symbol,
-    )}?apikey=${process.env.FMP_API_KEY}`;
+    )}&apikey=${process.env.FMP_API_KEY}`;
     let res: Response;
     try {
       res = await fetch(url);

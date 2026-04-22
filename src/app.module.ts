@@ -30,6 +30,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
+import { PaperTradesModule } from './modules/paper-trades/paper-trades.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     InvestmentInfoModule,
     DashboardModule,
     SettingsModule,
+    PaperTradesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
