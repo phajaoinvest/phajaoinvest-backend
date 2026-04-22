@@ -183,6 +183,7 @@ export class ExternalPriceFetcherService {
   constructor() {
     // In a real implementation, inject ConfigService and populate from env.
     const opts: PriceFetcherOptions = {
+      yahoo: { enabled: true },
       alphaVantage: {
         apiKey: process.env.ALPHA_VANTAGE_KEY,
         enabled: !!process.env.ALPHA_VANTAGE_KEY,
@@ -199,10 +200,9 @@ export class ExternalPriceFetcherService {
         apiKey: process.env.FMP_API_KEY,
         enabled: !!process.env.FMP_API_KEY,
       },
-      yahoo: { enabled: true },
       primary:
-        (process.env.MARKET_DATA_PRIMARY as MarketDataProvider) || 'yahoo',
-      fallbackOrder: ['fmp', 'alphaVantage', 'polygon', 'iex', 'yahoo'],
+        (process.env.MARKET_DATA_PRIMARY as MarketDataProvider) || 'fmp',
+      fallbackOrder: ['yahoo', 'fmp', 'alphaVantage', 'polygon', 'iex'],
     };
 
     this.primary = opts.primary;
