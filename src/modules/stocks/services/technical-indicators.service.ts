@@ -33,6 +33,7 @@ import {
   CompanyDocument,
 } from './technical-indicators.types';
 import { StockMetadataService } from './stock-metadata.service';
+import { RealTimePriceService } from './real-time-price.service';
 
 interface PolygonAggregatePayload {
   results?: Array<{
@@ -213,6 +214,7 @@ export class TechnicalIndicatorsService {
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
     private readonly stockMetadataService: StockMetadataService,
+    private readonly realTimePriceService: RealTimePriceService,
   ) {
     if (!this.alphaVantageApiKey && !this.polygonApiKey) {
       this.logger.warn(
@@ -1518,22 +1520,24 @@ export class TechnicalIndicatorsService {
   async getStockOverview(symbol: string): Promise<StockOverviewResponse> {
     const upper = symbol.toUpperCase();
 
-    // 1. Primary Source: Internal Database
+    // 1. Ensure Stock Exists in Database (Create placeholder if missing)
+    await this.realTimePriceService.ensureSymbol(upper).catch(() => null);
+
+    // 2. Fetch Current Database State
     const dbStock = await this.stockRepository.findOne({ 
       where: { symbol: upper },
       relations: ['stockCategory']
     }).catch(() => null);
 
-    // 2. Secondary Sources: External Metadata and Google Spreadsheet
+    // 3. Fetch Metadata and Spreadsheet Data
     const [basics, datasetRow] = await Promise.all([
       this.stockMetadataService.getCompanyBasics(upper).catch(() => null),
       this.fetchGoogleStockOverviewRow(upper).catch(() => null),
     ]);
 
-    // Validate spreadsheet row
     const validDatasetRow = (datasetRow && datasetRow.Ticker && datasetRow.Ticker.toUpperCase() === upper) ? datasetRow : null;
 
-    // 3. Build response with fallback chain: Database -> Spreadsheet -> Basics/Third-party
+    // 4. Build initial response with fallback chain
     const response: StockOverviewResponse = {
       symbol: upper,
       companyName:
@@ -1562,49 +1566,68 @@ export class TechnicalIndicatorsService {
       },
     };
 
-    // 4. Tertiary Augmentation: Real-time providers (FMP/Polygon)
-    // We only perform live augmentation if spreadsheet data is missing OR if we still have null technical levels
-    const hasMissingTechLevels = !response.supportLevel || !response.supportLevelSecondary || !response.resistance1 || !response.resistance2;
-    const useLive = this.primaryProvider === 'fmp' || !validDatasetRow;
+    // 5. Mandatory Live Augmentation: Real-time providers (FMP)
+    // We ALWAYS try to fetch the real price and latest technicals if the FMP key is available
+    if (this.fmpApiKey) {
+      this.logger.debug(`FMP: Syncing real-time overview for ${upper}`);
 
-    if ((useLive || hasMissingTechLevels) && this.fmpApiKey) {
-      this.logger.debug(`FMP: Orchestrating overview augmentation for ${upper}`);
+      try {
+        const [quote, rsiSignal, e50, e200, supportResult] = await Promise.all([
+          this.fetchFmpQuote(upper),
+          this.getFmpRSI(upper),
+          this.getFmpEMA(upper, 50),
+          this.getFmpEMA(upper, 200),
+          this.computeSupportSnapshot(upper, 'day', response.price),
+        ]);
 
-      const [quote, rsiSignal, e50, e200, supportResult] = await Promise.all([
-        this.fetchFmpQuote(upper),
-        this.getFmpRSI(upper),
-        this.getFmpEMA(upper, 50),
-        this.getFmpEMA(upper, 200),
-        this.computeSupportSnapshot(upper, 'day', response.price),
-      ]);
-
-      if (quote) {
-        response.price = response.price ?? quote.price;
-        response.changePercent = response.changePercent ?? quote.changesPercentage;
-        response.changePrice = response.changePrice ?? quote.change;
-        if (!response.companyName) response.companyName = quote.name;
-        if (!response.metadata.provider) response.metadata.provider = 'fmp';
-      }
-
-      if (rsiSignal) response.rsi = response.rsi ?? rsiSignal.rsi;
-      if (e50) response.ema50 = response.ema50 ?? e50;
-      if (e200) response.ema200 = response.ema200 ?? e200;
-
-      if (supportResult && supportResult.snapshot) {
-        const s = supportResult.snapshot;
-        // Apply FMP support levels ONLY where they are still missing (to honor Database priority)
-        response.supportLevel = response.supportLevel ?? s.supportLevel ?? null;
-        response.supportLevelSecondary = response.supportLevelSecondary ?? s.supportLevelSecondary ?? null;
-        response.resistance1 = response.resistance1 ?? s.resistance1 ?? null;
-        response.resistance2 = response.resistance2 ?? s.resistance2 ?? null;
-        
-        if (response.metadata.provider === null) {
-          response.metadata.provider = (supportResult.provider || 'fmp') as any;
+        if (quote) {
+          // Prioritize real-time price/change from third-party
+          response.price = quote.price;
+          response.changePercent = quote.changesPercentage;
+          response.changePrice = quote.change;
+          if (!response.companyName) response.companyName = quote.name;
+          response.metadata.provider = 'fmp';
         }
+
+        if (rsiSignal) response.rsi = rsiSignal.rsi;
+        if (e50) response.ema50 = e50;
+        if (e200) response.ema200 = e200;
+
+        if (supportResult && supportResult.snapshot) {
+          const s = supportResult.snapshot;
+          // Only update S/R if not already set by manual database entry (Priority 1)
+          const isManual = dbStock?.support1 !== null && dbStock?.support1 !== undefined;
+          if (!isManual) {
+            response.supportLevel = s.supportLevel ?? response.supportLevel;
+            response.supportLevelSecondary = s.supportLevelSecondary ?? response.supportLevelSecondary;
+            response.resistance1 = s.resistance1 ?? response.resistance1;
+            response.resistance2 = s.resistance2 ?? response.resistance2;
+          }
+          
+          if (!response.metadata.provider) {
+            response.metadata.provider = (supportResult.provider || 'fmp') as any;
+          }
+        }
+
+        // 6. Sync back to Database
+        if (dbStock) {
+          await this.stockRepository.update(dbStock.id, {
+            last_price: response.price ?? undefined,
+            change: response.changePrice ?? undefined,
+            change_percent: response.changePercent ?? undefined,
+            support1: response.supportLevel ?? undefined,
+            support2: response.supportLevelSecondary ?? undefined,
+            resistance1: response.resistance1 ?? undefined,
+            resistance2: response.resistance2 ?? undefined,
+            last_price_update: new Date(),
+          }).catch(err => this.logger.error(`Failed to update stock ${upper} in DB: ${err.message}`));
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to augment stock ${upper} with live data: ${error.message}`);
       }
     }
 
-    // 5. Final Rounding and Cleanup
+    // 7. Final Rounding and Cleanup
     if (response.price && response.changePercent && response.changePrice === null) {
       response.changePrice = (response.price * response.changePercent) / 100;
     }
@@ -1622,6 +1645,7 @@ export class TechnicalIndicatorsService {
 
     return response;
   }
+
 
   async getStockPriceHistory(
     symbol: string,
