@@ -43,10 +43,18 @@ export class StocksService {
       limit = 10,
       sort = 'created_at',
       order = 'DESC',
+      is_demo,
     } = options;
     const skip = (page - 1) * limit;
 
+    const where: any = {};
+    if (is_demo !== undefined) {
+      // Handle boolean or string conversion if coming from query params
+      where.is_demo = typeof is_demo === 'string' ? is_demo === 'true' : is_demo;
+    }
+
     const [stocks, total] = await this.stockRepository.findAndCount({
+      where,
       relations: ['stockCategory'],
       skip,
       take: limit,
@@ -316,6 +324,10 @@ export class StocksService {
       eps: stock.eps,
       week_52_high: stock.week_52_high,
       week_52_low: stock.week_52_low,
+      support1: stock.support1,
+      support2: stock.support2,
+      resistance1: stock.resistance1,
+      resistance2: stock.resistance2,
       data_source: stock.data_source,
       data_type: stock.data_type,
       data_delay_minutes: stock.data_delay_minutes,

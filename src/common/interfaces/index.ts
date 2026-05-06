@@ -25,6 +25,7 @@ export interface PaginationOptions {
   limit?: number;
   sort?: string;
   order?: 'ASC' | 'DESC';
+  is_demo?: boolean;
 }
 
 export interface PaginationResult<T> {

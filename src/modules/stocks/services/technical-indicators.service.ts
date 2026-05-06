@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Stock } from '../entities/stock.entity';
 import {
   AlphaVantageMarketMoversResponse,
   AlphaVantageStock,
@@ -206,7 +209,11 @@ export class TechnicalIndicatorsService {
     '';
   private readonly stockOverviewSourceUrl =
     process.env.STOCK_OVERVIEW_SOURCE_URL ?? '';
-  constructor(private readonly stockMetadataService: StockMetadataService) {
+  constructor(
+    @InjectRepository(Stock)
+    private readonly stockRepository: Repository<Stock>,
+    private readonly stockMetadataService: StockMetadataService,
+  ) {
     if (!this.alphaVantageApiKey && !this.polygonApiKey) {
       this.logger.warn(
         'No market data provider configured. Please set ALPHA_VANTAGE_KEY and/or POLYGON_API_KEY.',
@@ -1400,18 +1407,51 @@ export class TechnicalIndicatorsService {
     currentPrice?: number | null,
   ): Promise<{
     snapshot: SupportLevelsSnapshot | null;
-    provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | 'database' | null;
     message?: string;
   }> {
+    const upper = symbol.toUpperCase();
+    
+    // 1. Check database for manual/curated support levels first
+    const dbStock = await this.stockRepository.findOne({ where: { symbol: upper } }).catch(() => null);
+    const hasDbSupports = dbStock && (
+      dbStock.support1 !== null || 
+      dbStock.support2 !== null || 
+      dbStock.resistance1 !== null || 
+      dbStock.resistance2 !== null
+    );
+
+    // 2. Fetch history for RSI/EMA calculations and fallback S/R
     const now = Math.floor(Date.now() / 1000);
     const from = now - this.getSupportLookbackSeconds(resolution);
     const history = await this.fetchPriceSeries(symbol, resolution, from, now);
-    const snapshot = history.points.length
+    
+    // 3. Build baseline snapshot from history
+    let snapshot = history.points.length
       ? this.buildSupportSnapshot(history.points, currentPrice)
       : null;
+
+    // 4. Apply database overrides (Priority 1)
+    if (hasDbSupports) {
+      if (!snapshot) {
+        snapshot = {
+          supportLevel: null,
+          supportLevelSecondary: null,
+          resistance1: null,
+          resistance2: null,
+        };
+      }
+      
+      // We use the database values if present, otherwise keep what history provided
+      snapshot.supportLevel = this.normalizeNumeric(dbStock.support1) ?? snapshot.supportLevel;
+      snapshot.supportLevelSecondary = this.normalizeNumeric(dbStock.support2) ?? snapshot.supportLevelSecondary;
+      snapshot.resistance1 = this.normalizeNumeric(dbStock.resistance1) ?? snapshot.resistance1;
+      snapshot.resistance2 = this.normalizeNumeric(dbStock.resistance2) ?? snapshot.resistance2;
+    }
+
     return {
       snapshot,
-      provider: history.provider,
+      provider: hasDbSupports ? 'database' : (history.provider as any),
       message: history.message,
     };
   }
@@ -1477,54 +1517,57 @@ export class TechnicalIndicatorsService {
 
   async getStockOverview(symbol: string): Promise<StockOverviewResponse> {
     const upper = symbol.toUpperCase();
-    const basics = await this.stockMetadataService
-      .getCompanyBasics(upper)
-      .catch(() => null);
 
-    let datasetRow = await this.fetchGoogleStockOverviewRow(upper).catch(
-      () => null,
-    );
+    // 1. Primary Source: Internal Database
+    const dbStock = await this.stockRepository.findOne({ 
+      where: { symbol: upper },
+      relations: ['stockCategory']
+    }).catch(() => null);
 
-    // Validate if the datasetRow actually matches the requested symbol
-    if (
-      datasetRow &&
-      datasetRow.Ticker &&
-      datasetRow.Ticker.toUpperCase() !== upper
-    ) {
-      datasetRow = null;
-    }
+    // 2. Secondary Sources: External Metadata and Google Spreadsheet
+    const [basics, datasetRow] = await Promise.all([
+      this.stockMetadataService.getCompanyBasics(upper).catch(() => null),
+      this.fetchGoogleStockOverviewRow(upper).catch(() => null),
+    ]);
 
+    // Validate spreadsheet row
+    const validDatasetRow = (datasetRow && datasetRow.Ticker && datasetRow.Ticker.toUpperCase() === upper) ? datasetRow : null;
+
+    // 3. Build response with fallback chain: Database -> Spreadsheet -> Basics/Third-party
     const response: StockOverviewResponse = {
       symbol: upper,
       companyName:
+        dbStock?.name ||
         basics?.name ||
-        this.asString(datasetRow?.['Company name'])?.trim() ||
+        this.asString(validDatasetRow?.['Company name'])?.trim() ||
         null,
-      supportLevel: this.normalizeNumeric(datasetRow?.['Support 1']),
-      supportLevelSecondary: this.normalizeNumeric(datasetRow?.['Support 2']),
-      resistance1: this.normalizeNumeric(datasetRow?.['Resistance 1']),
-      resistance2: this.normalizeNumeric(datasetRow?.['Resistance 2']),
-      rsi: this.normalizeNumeric(datasetRow?.RSI),
-      ema50: this.normalizeNumeric(datasetRow?.['EMA 50']),
-      ema200: this.normalizeNumeric(datasetRow?.['EMA 200']),
-      price: this.normalizeNumeric(datasetRow?.Price),
-      changePrice: null,
-      changePercent: this.normalizeNumeric(datasetRow?.['Change %']),
-      group: this.asString(datasetRow?.Group)?.trim() ?? null,
+      supportLevel: this.normalizeNumeric(dbStock?.support1) ?? this.normalizeNumeric(validDatasetRow?.['Support 1']),
+      supportLevelSecondary: this.normalizeNumeric(dbStock?.support2) ?? this.normalizeNumeric(validDatasetRow?.['Support 2']),
+      resistance1: this.normalizeNumeric(dbStock?.resistance1) ?? this.normalizeNumeric(validDatasetRow?.['Resistance 1']),
+      resistance2: this.normalizeNumeric(dbStock?.resistance2) ?? this.normalizeNumeric(validDatasetRow?.['Resistance 2']),
+      rsi: this.normalizeNumeric(validDatasetRow?.RSI),
+      ema50: this.normalizeNumeric(validDatasetRow?.['EMA 50']),
+      ema200: this.normalizeNumeric(validDatasetRow?.['EMA 200']),
+      price: this.normalizeNumeric(dbStock?.last_price) ?? this.normalizeNumeric(validDatasetRow?.Price),
+      changePrice: this.normalizeNumeric(dbStock?.change) ?? null,
+      changePercent: this.normalizeNumeric(dbStock?.change_percent) ?? this.normalizeNumeric(validDatasetRow?.['Change %']),
+      group: dbStock?.stockCategory?.name || this.asString(validDatasetRow?.Group)?.trim() || null,
       metadata: {
-        provider: datasetRow ? 'google-script' : null,
+        provider: dbStock?.support1 ? 'database' : (validDatasetRow ? 'google-script' : null) as any,
         sourceUrl: this.stockOverviewSourceUrl || null,
         timestamp: new Date(),
-        message: datasetRow
+        message: (dbStock?.support1 || validDatasetRow)
           ? undefined
-          : 'Live data calculation active (spreadsheet missing)',
+          : 'Live data calculation active (no manual data found)',
       },
     };
 
-    // If Spreadsheet is missing OR FMP is primary, augment with live data
-    const useLive = this.primaryProvider === 'fmp' || !datasetRow;
+    // 4. Tertiary Augmentation: Real-time providers (FMP/Polygon)
+    // We only perform live augmentation if spreadsheet data is missing OR if we still have null technical levels
+    const hasMissingTechLevels = !response.supportLevel || !response.supportLevelSecondary || !response.resistance1 || !response.resistance2;
+    const useLive = this.primaryProvider === 'fmp' || !validDatasetRow;
 
-    if (useLive && this.fmpApiKey) {
+    if ((useLive || hasMissingTechLevels) && this.fmpApiKey) {
       this.logger.debug(`FMP: Orchestrating overview augmentation for ${upper}`);
 
       const [quote, rsiSignal, e50, e200, supportResult] = await Promise.all([
@@ -1532,45 +1575,40 @@ export class TechnicalIndicatorsService {
         this.getFmpRSI(upper),
         this.getFmpEMA(upper, 50),
         this.getFmpEMA(upper, 200),
-        this.computeSupportSnapshot(upper, 'day'),
+        this.computeSupportSnapshot(upper, 'day', response.price),
       ]);
 
       if (quote) {
-        response.price = quote.price ?? response.price;
-        response.changePercent =
-          quote.changesPercentage ?? response.changePercent;
-        response.changePrice = quote.change ?? response.changePrice;
+        response.price = response.price ?? quote.price;
+        response.changePercent = response.changePercent ?? quote.changesPercentage;
+        response.changePrice = response.changePrice ?? quote.change;
         if (!response.companyName) response.companyName = quote.name;
-        response.metadata.provider = 'fmp';
+        if (!response.metadata.provider) response.metadata.provider = 'fmp';
       }
 
-      if (rsiSignal) response.rsi = rsiSignal.rsi;
-      if (e50) response.ema50 = e50;
-      if (e200) response.ema200 = e200;
+      if (rsiSignal) response.rsi = response.rsi ?? rsiSignal.rsi;
+      if (e50) response.ema50 = response.ema50 ?? e50;
+      if (e200) response.ema200 = response.ema200 ?? e200;
 
       if (supportResult && supportResult.snapshot) {
         const s = supportResult.snapshot;
-        response.supportLevel = s.supportLevel ?? response.supportLevel;
-        response.supportLevelSecondary =
-          s.supportLevelSecondary ?? response.supportLevelSecondary;
-        response.resistance1 = s.resistance1 ?? response.resistance1;
-        response.resistance2 = s.resistance2 ?? response.resistance2;
-        if (response.metadata.provider !== 'fmp') {
-          response.metadata.provider = supportResult.provider || 'fmp';
+        // Apply FMP support levels ONLY where they are still missing (to honor Database priority)
+        response.supportLevel = response.supportLevel ?? s.supportLevel ?? null;
+        response.supportLevelSecondary = response.supportLevelSecondary ?? s.supportLevelSecondary ?? null;
+        response.resistance1 = response.resistance1 ?? s.resistance1 ?? null;
+        response.resistance2 = response.resistance2 ?? s.resistance2 ?? null;
+        
+        if (response.metadata.provider === null) {
+          response.metadata.provider = (supportResult.provider || 'fmp') as any;
         }
       }
     }
 
-    // Secondary fallback for changePrice
-    if (
-      response.price &&
-      response.changePercent &&
-      response.changePrice === null
-    ) {
+    // 5. Final Rounding and Cleanup
+    if (response.price && response.changePercent && response.changePrice === null) {
       response.changePrice = (response.price * response.changePercent) / 100;
     }
 
-    // Final Rounding
     response.price = this.roundTo(response.price, 2);
     response.changePrice = this.roundTo(response.changePrice, 2);
     response.changePercent = this.roundTo(response.changePercent, 2);
@@ -1578,10 +1616,7 @@ export class TechnicalIndicatorsService {
     response.ema50 = this.roundTo(response.ema50, 2);
     response.ema200 = this.roundTo(response.ema200, 2);
     response.supportLevel = this.roundTo(response.supportLevel, 2);
-    response.supportLevelSecondary = this.roundTo(
-      response.supportLevelSecondary,
-      2,
-    );
+    response.supportLevelSecondary = this.roundTo(response.supportLevelSecondary, 2);
     response.resistance1 = this.roundTo(response.resistance1, 2);
     response.resistance2 = this.roundTo(response.resistance2, 2);
 

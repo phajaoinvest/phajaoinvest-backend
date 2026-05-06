@@ -306,6 +306,42 @@ export class Stock {
   })
   week_52_low: number;
 
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    nullable: true,
+    comment: 'First support level',
+  })
+  support1: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    nullable: true,
+    comment: 'Second support level',
+  })
+  support2: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    nullable: true,
+    comment: 'First resistance level',
+  })
+  resistance1: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    nullable: true,
+    comment: 'Second resistance level',
+  })
+  resistance2: number;
+
   // Data Source & Quality
   @Column({
     type: 'varchar',

@@ -91,6 +91,12 @@ export class StocksController {
     example: 'DESC',
     description: 'Sort order ASC|DESC',
   })
+  @ApiQuery({
+    name: 'is_demo',
+    required: false,
+    type: 'boolean',
+    description: 'Filter by demo status',
+  })
   @ApiResponse({
     status: 200,
     description: 'Paginated list returned',

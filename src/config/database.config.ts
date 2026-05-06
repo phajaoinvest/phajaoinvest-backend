@@ -14,7 +14,7 @@ export const getDatabaseConfig = (
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
     migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
     // synchronize: true, // Enable to auto-create missing tables (users, paper_trades, etc.)
-    synchronize: false,
+    synchronize: true,
     // synchronize: configService.get<boolean>('DATABASE_SYNCHRONIZE', false),
     logging: configService.get<boolean>('DATABASE_LOGGING', true),
     ssl: false, // Explicitly disable SSL for local development

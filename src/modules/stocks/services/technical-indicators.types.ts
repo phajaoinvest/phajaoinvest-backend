@@ -163,7 +163,7 @@ export interface StockOverviewResponse {
   changePercent: number | null;
   group: string | null;
   metadata: {
-    provider: 'fmp' | 'polygon' | 'alphaVantage' | 'google-script' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | 'google-script' | 'database' | null;
     sourceUrl: string | null;
     timestamp: Date;
     message?: string;
@@ -175,7 +175,7 @@ export interface StockPriceHistoryResponse {
   companyName?: string | null;
   range: StockPriceHistoryRange;
   resolution: PriceResolution;
-  provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
+  provider: 'fmp' | 'polygon' | 'alphaVantage' | 'database' | null;
   points: StockPricePoint[];
   support?: SupportLevelsSnapshot | null;
   metadata: {
@@ -223,7 +223,7 @@ export interface StockPerformanceResponse {
   entries: StockPerformanceEntry[];
   latestClose?: number | null;
   metadata: {
-    provider: 'fmp' | 'polygon' | 'alphaVantage' | null;
+    provider: 'fmp' | 'polygon' | 'alphaVantage' | 'database' | null;
     from: number;
     to: number;
     count: number;
@@ -371,7 +371,7 @@ export interface CompanyDocumentsResponse {
     limit?: number;
   };
   metadata: {
-    provider: 'fmp' | 'polygon' | 'sec' | 'google-script';
+    provider: 'fmp' | 'polygon' | 'sec' | 'google-script' | 'database';
     total: number;
     hasMore: boolean;
     fetchedAt: Date;

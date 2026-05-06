@@ -50,6 +50,38 @@ export class CreateStockDto {
   @ApiPropertyOptional({ example: true, description: 'Show ticker symbol to customers' })
   @IsOptional()
   show_symbol?: boolean;
+
+  @ApiPropertyOptional({ example: 170.0, description: 'First support level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  support1?: number;
+
+  @ApiPropertyOptional({ example: 165.0, description: 'Second support level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  support2?: number;
+
+  @ApiPropertyOptional({ example: 180.0, description: 'First resistance level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  resistance1?: number;
+
+  @ApiPropertyOptional({ example: 185.0, description: 'Second resistance level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  resistance2?: number;
 }
 
 export class UpdateStockDto {
@@ -142,6 +174,38 @@ export class UpdateStockDto {
   @IsBoolean()
   @IsOptional()
   is_demo?: boolean;
+
+  @ApiPropertyOptional({ example: 170.0, description: 'First support level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  support1?: number;
+
+  @ApiPropertyOptional({ example: 165.0, description: 'Second support level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  support2?: number;
+
+  @ApiPropertyOptional({ example: 180.0, description: 'First resistance level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  resistance1?: number;
+
+  @ApiPropertyOptional({ example: 185.0, description: 'Second resistance level' })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? parseFloat(value) : (value as number),
+  )
+  resistance2?: number;
 }
 
 export class StockResponseDto {
@@ -284,6 +348,18 @@ export class StockResponseDto {
 
   @ApiPropertyOptional({ example: 124.17, description: '52-week low' })
   week_52_low?: number;
+
+  @ApiPropertyOptional({ example: 170.0, description: 'First support level' })
+  support1?: number;
+
+  @ApiPropertyOptional({ example: 165.0, description: 'Second support level' })
+  support2?: number;
+
+  @ApiPropertyOptional({ example: 180.0, description: 'First resistance level' })
+  resistance1?: number;
+
+  @ApiPropertyOptional({ example: 185.0, description: 'Second resistance level' })
+  resistance2?: number;
 
   // Data Source
   @ApiPropertyOptional({ example: 'FMP', description: 'Data source provider' })
