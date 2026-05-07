@@ -6,6 +6,7 @@ import { StockCategory } from '../../stock-categories/entities/stock-category.en
 interface CompanyProfile {
   symbol: string;
   name?: string;
+  description?: string;
   country?: string;
   sector?: string;
   industry?: string;
@@ -14,6 +15,7 @@ interface CompanyProfile {
 interface FmpProfileRaw {
   symbol?: string;
   companyName?: string;
+  description?: string;
   country?: string;
   sector?: string;
   industry?: string;
@@ -151,6 +153,7 @@ export class StockMetadataService {
       return {
         symbol: upper,
         name: raw.companyName ?? undefined,
+        description: raw.description ?? undefined,
         country: raw.country ?? undefined,
         sector: raw.sector ?? undefined,
         industry: raw.industry ?? raw.sector ?? undefined,
@@ -188,6 +191,7 @@ export class StockMetadataService {
       return {
         symbol: upper,
         name: result.longName ?? result.shortName ?? result.symbol,
+        description: result.description ?? undefined,
         country: result.region === 'US' ? 'USA' : result.region,
         // Yahoo simple quote doesn't provide sector/industry reliably without extra modules.
         sector: result.quoteType ?? undefined,
@@ -247,6 +251,7 @@ export class StockMetadataService {
       return {
         symbol: upper,
         name: result.name ?? undefined,
+        description: result.description ?? undefined,
         country,
         sector: result.type ?? undefined,
         industry,
@@ -306,11 +311,12 @@ export class StockMetadataService {
    */
   async getCompanyBasics(symbol: string): Promise<{
     name?: string;
+    description?: string;
     country?: string;
   } | null> {
     const profile = await this.fetchCompanyProfile(symbol);
     if (!profile) return null;
-    return { name: profile.name, country: profile.country };
+    return { name: profile.name, description: profile.description, country: profile.country };
   }
 
   private normalizeCategory(industry?: string): string | null {

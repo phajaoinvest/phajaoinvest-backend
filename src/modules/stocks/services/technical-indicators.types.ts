@@ -151,6 +151,7 @@ export interface SupportLevelsSnapshot {
 export interface StockOverviewResponse {
   symbol: string;
   companyName?: string | null;
+  description?: string | null;
   supportLevel: number | null;
   supportLevelSecondary: number | null;
   resistance1: number | null;

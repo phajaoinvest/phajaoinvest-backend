@@ -34,6 +34,7 @@ import {
 } from './technical-indicators.types';
 import { StockMetadataService } from './stock-metadata.service';
 import { RealTimePriceService } from './real-time-price.service';
+import { ExternalPriceFetcherService } from './external-price-fetcher.service';
 
 interface PolygonAggregatePayload {
   results?: Array<{
@@ -215,6 +216,7 @@ export class TechnicalIndicatorsService {
     private readonly stockRepository: Repository<Stock>,
     private readonly stockMetadataService: StockMetadataService,
     private readonly realTimePriceService: RealTimePriceService,
+    private readonly externalPriceFetcher: ExternalPriceFetcherService,
   ) {
     if (!this.alphaVantageApiKey && !this.polygonApiKey) {
       this.logger.warn(
@@ -1413,13 +1415,13 @@ export class TechnicalIndicatorsService {
     message?: string;
   }> {
     const upper = symbol.toUpperCase();
-    
+
     // 1. Check database for manual/curated support levels first
     const dbStock = await this.stockRepository.findOne({ where: { symbol: upper } }).catch(() => null);
     const hasDbSupports = dbStock && (
-      dbStock.support1 !== null || 
-      dbStock.support2 !== null || 
-      dbStock.resistance1 !== null || 
+      dbStock.support1 !== null ||
+      dbStock.support2 !== null ||
+      dbStock.resistance1 !== null ||
       dbStock.resistance2 !== null
     );
 
@@ -1427,7 +1429,7 @@ export class TechnicalIndicatorsService {
     const now = Math.floor(Date.now() / 1000);
     const from = now - this.getSupportLookbackSeconds(resolution);
     const history = await this.fetchPriceSeries(symbol, resolution, from, now);
-    
+
     // 3. Build baseline snapshot from history
     let snapshot = history.points.length
       ? this.buildSupportSnapshot(history.points, currentPrice)
@@ -1443,7 +1445,7 @@ export class TechnicalIndicatorsService {
           resistance2: null,
         };
       }
-      
+
       // We use the database values if present, otherwise keep what history provided
       snapshot.supportLevel = this.normalizeNumeric(dbStock.support1) ?? snapshot.supportLevel;
       snapshot.supportLevelSecondary = this.normalizeNumeric(dbStock.support2) ?? snapshot.supportLevelSecondary;
@@ -1524,7 +1526,7 @@ export class TechnicalIndicatorsService {
     await this.realTimePriceService.ensureSymbol(upper).catch(() => null);
 
     // 2. Fetch Current Database State
-    const dbStock = await this.stockRepository.findOne({ 
+    const dbStock = await this.stockRepository.findOne({
       where: { symbol: upper },
       relations: ['stockCategory']
     }).catch(() => null);
@@ -1556,6 +1558,7 @@ export class TechnicalIndicatorsService {
       changePrice: this.normalizeNumeric(dbStock?.change) ?? null,
       changePercent: this.normalizeNumeric(dbStock?.change_percent) ?? this.normalizeNumeric(validDatasetRow?.['Change %']),
       group: dbStock?.stockCategory?.name || this.asString(validDatasetRow?.Group)?.trim() || null,
+      description: dbStock?.description || basics?.description || null,
       metadata: {
         provider: dbStock?.support1 ? 'database' : (validDatasetRow ? 'google-script' : null) as any,
         sourceUrl: this.stockOverviewSourceUrl || null,
@@ -1572,21 +1575,43 @@ export class TechnicalIndicatorsService {
       this.logger.debug(`FMP: Syncing real-time overview for ${upper}`);
 
       try {
-        const [quote, rsiSignal, e50, e200, supportResult] = await Promise.all([
-          this.fetchFmpQuote(upper),
+        // We always try to fetch profile if FMP key is present to have fallbacks for price and name
+        const [quote, rsiSignal, e50, e200, supportResult, profile] = await Promise.all([
+          this.externalPriceFetcher.fetchQuote(upper),
           this.getFmpRSI(upper),
           this.getFmpEMA(upper, 50),
           this.getFmpEMA(upper, 200),
           this.computeSupportSnapshot(upper, 'day', response.price),
+          this.fetchFmpProfile(upper),
         ]);
-
+        console.log({ quote })
         if (quote) {
           // Prioritize real-time price/change from third-party
           response.price = quote.price;
-          response.changePercent = quote.changesPercentage;
-          response.changePrice = quote.change;
-          if (!response.companyName) response.companyName = quote.name;
-          response.metadata.provider = 'fmp';
+          // Map changesPercentage if available (usually from FMP) or calculate it
+          response.changePercent = (quote as any).changesPercentage ?? 
+            (quote.previousClose ? ((quote.price - quote.previousClose) / quote.previousClose) * 100 : response.changePercent);
+          response.changePrice = (quote as any).change ?? 
+            (quote.previousClose ? quote.price - quote.previousClose : response.changePrice);
+          
+          if (!response.companyName) response.companyName = (quote as any).name || response.companyName;
+          response.metadata.provider = quote.provider as any;
+        } else {
+          // If direct quote fails, some symbols (especially non-US) might be under different patterns
+          // or crypto might need different format. But usually FMP quote is the standard.
+          this.logger.warn(`FMP: No quote found for ${upper}. Trying profile price fallback.`);
+          if (profile && profile.price) {
+            response.price = profile.price;
+            response.changePrice = profile.changes;
+            // profile doesn't always have percent change directly in the same field name
+            if (!response.companyName) response.companyName = profile.companyName;
+            response.metadata.provider = 'fmp';
+          }
+        }
+
+        if (profile && profile.description) {
+          response.description = profile.description;
+          if (!response.companyName) response.companyName = profile.companyName;
         }
 
         if (rsiSignal) response.rsi = rsiSignal.rsi;
@@ -1603,7 +1628,7 @@ export class TechnicalIndicatorsService {
             response.resistance1 = s.resistance1 ?? response.resistance1;
             response.resistance2 = s.resistance2 ?? response.resistance2;
           }
-          
+
           if (!response.metadata.provider) {
             response.metadata.provider = (supportResult.provider || 'fmp') as any;
           }
@@ -1612,6 +1637,8 @@ export class TechnicalIndicatorsService {
         // 6. Sync back to Database
         if (dbStock) {
           await this.stockRepository.update(dbStock.id, {
+            name: response.companyName || undefined,
+            description: response.description || undefined,
             last_price: response.price ?? undefined,
             change: response.changePrice ?? undefined,
             change_percent: response.changePercent ?? undefined,
@@ -2883,28 +2910,40 @@ export class TechnicalIndicatorsService {
 
     const upper = symbol.toUpperCase();
     const fmpInterval = interval === 'daily' ? 'daily' : '1min'; // simplified
-    const url = `https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}?type=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`;
-    // const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`;
+    const urls = [
+      `https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}?type=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`,
+    ];
 
-    try {
-      const response = await fetch(url);
-      if (!response.ok) return null;
-
-      const payload = (await response.json()) as any[];
-      if (!Array.isArray(payload) || !payload.length) return null;
-
-      const latest = payload[0];
-      return {
-        symbol: upper,
-        rsi: this.roundTo(latest.rsi, 2) ?? latest.rsi,
-        status: this.classifyRsi(latest.rsi),
-        timestamp: new Date(latest.date),
-        provider: 'fmp',
-      };
-    } catch (error) {
-      this.logger.debug(`FMP RSI error: ${error.message}`);
-      return null;
+    if (!upper.includes('USD') && (upper.length <= 5)) {
+      urls.push(`https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}USD?type=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`);
     }
+
+    if (!upper.includes('.') && !upper.includes(':')) {
+      urls.push(`https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}.BK?type=rsi&period=${timeperiod}&apikey=${this.fmpApiKey}`);
+    }
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) continue;
+
+        const payload = (await response.json()) as any[];
+        if (Array.isArray(payload) && payload.length > 0) {
+          const latest = payload[0];
+          return {
+            symbol: upper,
+            rsi: this.roundTo(latest.rsi, 2) ?? latest.rsi,
+            status: this.classifyRsi(latest.rsi),
+            timestamp: new Date(latest.date),
+            provider: 'fmp',
+          };
+        }
+      } catch (error) {
+        this.logger.debug(`FMP RSI error for ${url}: ${error.message}`);
+      }
+    }
+
+    return null;
   }
 
   private async getFmpEMA(
@@ -2916,40 +2955,103 @@ export class TechnicalIndicatorsService {
 
     const upper = symbol.toUpperCase();
     const fmpInterval = interval === 'daily' ? 'daily' : '1min';
-    const url = `https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}?type=ema&period=${period}&apikey=${this.fmpApiKey}`;
-    // const url = `https://financialmodelingprep.com/stable/technical-indicator/${fmpInterval}/${upper}?indicator=ema&period=${period}&apikey=${this.fmpApiKey}`;
-    try {
-      const response = await fetch(url);
-      if (!response.ok) return null;
+    const urls = [
+      `https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}?type=ema&period=${period}&apikey=${this.fmpApiKey}`,
+    ];
 
-      const payload = (await response.json()) as any[];
-      if (!Array.isArray(payload) || !payload.length) return null;
-
-      return payload[0]?.ema ?? null;
-    } catch (error) {
-      this.logger.debug(`FMP EMA error for ${upper} (${period}): ${error.message}`);
-      return null;
+    if (!upper.includes('USD') && (upper.length <= 5)) {
+      urls.push(`https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}USD?type=ema&period=${period}&apikey=${this.fmpApiKey}`);
     }
+
+    if (!upper.includes('.') && !upper.includes(':')) {
+      urls.push(`https://financialmodelingprep.com/api/v3/technical_indicator/${fmpInterval}/${upper}.BK?type=ema&period=${period}&apikey=${this.fmpApiKey}`);
+    }
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) continue;
+
+        const payload = (await response.json()) as any[];
+        if (Array.isArray(payload) && payload.length > 0) {
+          return payload[0]?.ema ?? null;
+        }
+      } catch (error) {
+        this.logger.debug(`FMP EMA error for ${url}: ${error.message}`);
+      }
+    }
+
+    return null;
   }
 
   private async fetchFmpQuote(symbol: string): Promise<any | null> {
     if (!this.fmpApiKey) return null;
 
     const upper = symbol.toUpperCase();
-    const url = `https://financialmodelingprep.com/api/v3/quote/${upper}?apikey=${this.fmpApiKey}`;
-    // const url = `https://financialmodelingprep.com/stable/quote?symbol=${upper}&apikey=${this.fmpApiKey}`;
-    try {
-      const response = await fetch(url);
-      if (!response.ok) return null;
+    const urls = [
+      `https://financialmodelingprep.com/api/v3/quote/${upper}?apikey=${this.fmpApiKey}`,
+    ];
 
-      const payload = (await response.json()) as any[];
-      if (!Array.isArray(payload) || !payload.length) return null;
-
-      return payload[0];
-    } catch (error) {
-      this.logger.debug(`FMP Quote error for ${upper}: ${error.message}`);
-      return null;
+    // Fallback logic for common symbol mismatches
+    if (!upper.includes('USD') && (upper.length <= 5)) {
+      // Potentially a crypto symbol without USD
+      urls.push(`https://financialmodelingprep.com/api/v3/quote/${upper}USD?apikey=${this.fmpApiKey}`);
     }
+
+    // For Thai stocks, some might be in the database without .BK suffix
+    // FMP usually expects .BK for SET stocks
+    if (!upper.includes('.') && !upper.includes(':')) {
+      urls.push(`https://financialmodelingprep.com/api/v3/quote/${upper}.BK?apikey=${this.fmpApiKey}`);
+    }
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) continue;
+
+        const payload = (await response.json()) as any[];
+        if (Array.isArray(payload) && payload.length > 0) {
+          return payload[0];
+        }
+      } catch (error) {
+        this.logger.debug(`FMP Quote error for ${url}: ${error.message}`);
+      }
+    }
+
+    return null;
+  }
+
+  private async fetchFmpProfile(symbol: string): Promise<any | null> {
+    if (!this.fmpApiKey) return null;
+
+    const upper = symbol.toUpperCase();
+    const urls = [
+      `https://financialmodelingprep.com/api/v3/profile/${upper}?apikey=${this.fmpApiKey}`,
+    ];
+
+    if (!upper.includes('USD') && (upper.length <= 5)) {
+      urls.push(`https://financialmodelingprep.com/api/v3/profile/${upper}USD?apikey=${this.fmpApiKey}`);
+    }
+
+    if (!upper.includes('.') && !upper.includes(':')) {
+      urls.push(`https://financialmodelingprep.com/api/v3/profile/${upper}.BK?apikey=${this.fmpApiKey}`);
+    }
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) continue;
+
+        const payload = (await response.json()) as any[];
+        if (Array.isArray(payload) && payload.length > 0) {
+          return payload[0];
+        }
+      } catch (error) {
+        this.logger.debug(`FMP Profile error for ${url}: ${error.message}`);
+      }
+    }
+
+    return null;
   }
 
   private async getFmpMarketMovers(

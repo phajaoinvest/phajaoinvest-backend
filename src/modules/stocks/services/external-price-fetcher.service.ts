@@ -230,31 +230,53 @@ export class ExternalPriceFetcherService {
   }
 
   async fetchQuote(symbol: string): Promise<ExternalQuote | null> {
-    const pipeline: MarketDataProvider[] = [this.primary, ...this.fallback];
-    this.logger.debug(
-      `[${symbol}] Trying providers in order: [${pipeline.join(', ')}]`,
-    );
+    const upper = symbol.toUpperCase();
+    const symbolsToTry = [upper];
 
-    for (const provider of pipeline) {
-      try {
-        this.logger.debug(`[${symbol}] Trying provider: ${provider}`);
-        const quote = await this.fetchFromProvider(provider, symbol);
-        if (quote && typeof quote.price === 'number' && quote.price > 0) {
-          this.logger.debug(
-            `[${symbol}] SUCCESS from ${provider}: $${quote.price}`,
+    // Build fallback list based on common patterns
+    if (!upper.includes('USD') && upper.length <= 5) {
+      symbolsToTry.push(`${upper}USD`);
+    }
+    if (!upper.includes('.') && !upper.includes(':')) {
+      symbolsToTry.push(`${upper}.BK`);
+    }
+
+    const pipeline: MarketDataProvider[] = [this.primary, ...this.fallback];
+
+    for (const currentSymbol of symbolsToTry) {
+      this.logger.debug(
+        `[${currentSymbol}] Trying providers in order: [${pipeline.join(', ')}]`,
+      );
+
+      for (const provider of pipeline) {
+        try {
+          this.logger.debug(`[${currentSymbol}] Trying provider: ${provider}`);
+          const quote = await this.fetchFromProvider(provider, currentSymbol);
+          if (quote && typeof quote.price === 'number' && quote.price > 0) {
+            this.logger.debug(
+              `[${currentSymbol}] SUCCESS from ${provider}: $${quote.price}`,
+            );
+            // If we succeeded with a fallback symbol, map it back to the original request symbol
+            return {
+              ...quote,
+              symbol: upper,
+            };
+          } else {
+            this.logger.debug(
+              `[${currentSymbol}] No data from provider: ${provider}`,
+            );
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `[${currentSymbol}] Provider ${provider} failed: ${message}`,
           );
-          return quote;
-        } else {
-          this.logger.debug(`[${symbol}] No data from provider: ${provider}`);
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`[${symbol}] Provider ${provider} failed: ${message}`);
       }
     }
 
     this.logger.error(
-      `[${symbol}] ALL providers failed. Pipeline was: [${pipeline.join(', ')}]`,
+      `[${upper}] ALL providers and fallback symbols failed. Pipeline was: [${pipeline.join(', ')}]`,
     );
     return null;
   }

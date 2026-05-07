@@ -54,7 +54,7 @@ export class Stock {
   @Column({ type: 'varchar', length: 100, nullable: true })
   country: string;
 
-  @Column({ type: 'varchar', length: 1000, nullable: true })
+  @Column({ type: 'text', nullable: true })
   description: string;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
