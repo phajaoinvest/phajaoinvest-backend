@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { Stock } from './entities/stock.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { CustomerStock } from '../customer-stocks/entities/customer-stock.entity';
@@ -33,7 +33,7 @@ export class StocksService {
     private readonly stockTransactionRepository: Repository<StockTransaction>,
     @InjectRepository(Wallet)
     private readonly walletRepository: Repository<Wallet>,
-  ) {}
+  ) { }
 
   async findAll(
     options: PaginationOptions = {},
@@ -44,6 +44,7 @@ export class StocksService {
       sort = 'created_at',
       order = 'DESC',
       is_demo,
+      search
     } = options;
     const skip = (page - 1) * limit;
 
@@ -51,6 +52,10 @@ export class StocksService {
     if (is_demo !== undefined) {
       // Handle boolean or string conversion if coming from query params
       where.is_demo = typeof is_demo === 'string' ? is_demo === 'true' : is_demo;
+    }
+
+    if (search) {
+      where.symbol = Like(`%${search}%`);
     }
 
     const [stocks, total] = await this.stockRepository.findAndCount({
@@ -333,9 +338,9 @@ export class StocksService {
       data_delay_minutes: stock.data_delay_minutes,
       stockCategory: category
         ? {
-            id: category.id,
-            name: category.name,
-          }
+          id: category.id,
+          name: category.name,
+        }
         : undefined,
       created_at: stock.created_at,
       updated_at: stock.updated_at,
